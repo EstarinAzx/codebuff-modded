@@ -40,6 +40,7 @@ function syncSdkActiveProfile(profile: ProviderProfile | null): void {
     provider: profile.provider,
     baseUrl: profile.baseUrl,
     apiKey: profile.apiKey,
+    model: profile.model,
   })
 }
 
@@ -265,9 +266,9 @@ export async function handleModelCommand(args: string): Promise<string> {
   }
   const updated = updateProfile(profile.id, { model: target })
   if (!updated) return `Failed to update active profile.`
-  // Profile shape (baseUrl/apiKey/provider) unchanged → SDK state stays current.
-  // No setActiveByokProfile call needed; model is resolved per-request from
-  // agent template, not from the SDK singleton.
+  // Profile-pinned model wins inside Path C, so push the new model into the
+  // SDK singleton — otherwise the next request still uses the old model.
+  syncSdkActiveProfile(updated)
   return `Active model set to "${target}" for profile "${updated.name}".`
 }
 

@@ -58,6 +58,14 @@ export type BYOKProfile = {
   baseUrl: string
   /** API key for Authorization: Bearer. */
   apiKey: string
+  /**
+   * Optional model id. When set, Path C resolves to this model regardless of
+   * what the agent template requested — single BYOK profile uses one model
+   * across all agents (v1 limitation, swap with `/model`).
+   * When empty, the agent template's `params.model` is used as-is (useful when
+   * the template's id is one the user's provider actually serves).
+   */
+  model?: string
 }
 
 let activeByokProfile: BYOKProfile | null = null
@@ -82,7 +90,14 @@ export function setActiveByokProfile(profile: BYOKProfile | null): void {
   ) {
     throw new Error('setActiveByokProfile: invalid profile shape')
   }
-  activeByokProfile = { provider: profile.provider, baseUrl, apiKey: profile.apiKey }
+  activeByokProfile = {
+    provider: profile.provider,
+    baseUrl,
+    apiKey: profile.apiKey,
+    model: typeof profile.model === 'string' && profile.model.length > 0
+      ? profile.model
+      : undefined,
+  }
 }
 
 export function getActiveByokProfile(): BYOKProfile | null {
@@ -175,8 +190,15 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
   // Path C — BYOK profile (highest precedence when registered).
   // No-op for SDK consumers that never call setActiveByokProfile().
   if (activeByokProfile) {
+    // Profile-pinned model wins so a single BYOK profile is internally consistent
+    // (agent templates would otherwise request models the user's provider can't
+    // serve). User swaps with /model; see cli/src/commands/providers.ts.
+    const resolvedModel = activeByokProfile.model ?? model
     return {
-      model: createDirectProviderModel({ profile: activeByokProfile, model }),
+      model: createDirectProviderModel({
+        profile: activeByokProfile,
+        model: resolvedModel,
+      }),
       isChatGptOAuth: false,
     }
   }

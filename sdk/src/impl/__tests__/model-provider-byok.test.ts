@@ -93,6 +93,36 @@ describe('Path C — BYOK profile selection', () => {
     expect(getActiveByokProfile()?.baseUrl).toBe('https://openrouter.ai/api/v1')
   })
 
+  test('profile.model overrides params.model when set', async () => {
+    setActiveByokProfile({
+      ...OPENAI_COMPAT_PROFILE,
+      model: 'glm-5',
+    })
+    const result = await getModelForRequest({
+      apiKey: 'codebuff-key',
+      // Agent template requested a model the profile would never serve
+      model: 'anthropic/claude-sonnet-4.5',
+    })
+    expect((result.model as { modelId?: string }).modelId).toBe('glm-5')
+  })
+
+  test('empty profile.model falls back to params.model', async () => {
+    setActiveByokProfile({
+      ...OPENAI_COMPAT_PROFILE,
+      model: '',
+    })
+    const result = await getModelForRequest({
+      apiKey: 'codebuff-key',
+      model: 'some/model-id',
+    })
+    expect((result.model as { modelId?: string }).modelId).toBe('some/model-id')
+  })
+
+  test('setActiveByokProfile drops empty model string', () => {
+    setActiveByokProfile({ ...OPENAI_COMPAT_PROFILE, model: '' })
+    expect(getActiveByokProfile()?.model).toBeUndefined()
+  })
+
   test('setActiveByokProfile rejects malformed profile', () => {
     expect(() =>
       setActiveByokProfile({

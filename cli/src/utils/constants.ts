@@ -127,15 +127,18 @@ export const MAIN_AGENT_ID = 'main-agent'
  * Mapping from agent mode to agent ID.
  * Single source of truth for all agent modes (order = cycling order).
  *
+ * BYOK fork: regular Codebuff modes route to local mod-* templates in
+ * .agents/ since upstream base2-* lives in the codebuff.com agent template
+ * DB and is unfetchable without backend auth.
+ *
  * Freebuff resolves LITE through the selected freebuff model at send time;
- * this fallback stays on base2-free for non-runtime callers. Regular
- * Codebuff maps LITE to base2-lite which charges credits normally.
+ * this fallback stays on base2-free for non-runtime freebuff callers.
  */
 export const AGENT_MODE_TO_ID = {
-  DEFAULT: 'base2',
-  LITE: IS_FREEBUFF ? 'base2-free' : 'base2-lite',
-  MAX: 'base2-max',
-  PLAN: 'base2-plan',
+  DEFAULT: IS_FREEBUFF ? 'base2' : 'mod-default',
+  LITE: IS_FREEBUFF ? 'base2-free' : 'mod-lite',
+  MAX: IS_FREEBUFF ? 'base2-max' : 'mod-max',
+  PLAN: IS_FREEBUFF ? 'base2-plan' : 'mod-plan',
 } as const
 
 export type AgentMode = keyof typeof AGENT_MODE_TO_ID

@@ -62,6 +62,7 @@ export async function initializeApp(params: { cwd?: string }): Promise<void> {
         provider: profile.provider,
         baseUrl: profile.baseUrl,
         apiKey: profile.apiKey,
+        model: profile.model,
       })
     }
   } catch (error) {
