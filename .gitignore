@@ -14,6 +14,8 @@ node_modules
 dev
 dist
 dist-env
+# BYOK fork: release binary staging dir (per-platform tar.gz uploads)
+dist-binaries
 tsconfig.tsbuildinfo
 .manicode
 __mock-projects__

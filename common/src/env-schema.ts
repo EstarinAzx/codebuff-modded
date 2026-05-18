@@ -16,7 +16,7 @@ export const SENTINEL_BACKEND_URL = 'http://127.0.0.1:1'
  * actually use the backend can still provide the real values.
  */
 export const clientEnvSchema = z.object({
-  NEXT_PUBLIC_CB_ENVIRONMENT: z.enum(['dev', 'test', 'prod']),
+  NEXT_PUBLIC_CB_ENVIRONMENT: z.enum(['dev', 'test', 'prod']).default('prod'),
   NEXT_PUBLIC_CODEBUFF_APP_URL: z.url().default(SENTINEL_BACKEND_URL),
   NEXT_PUBLIC_SUPPORT_EMAIL: z.string().default(''),
   NEXT_PUBLIC_POSTHOG_API_KEY: z.string().default(''),
