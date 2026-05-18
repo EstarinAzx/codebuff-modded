@@ -24,7 +24,12 @@ export const clientEnvSchema = z.object({
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().default(''),
   NEXT_PUBLIC_STRIPE_CUSTOMER_PORTAL: z.string().default(''),
   NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION_ID: z.string().optional(),
-  NEXT_PUBLIC_WEB_PORT: z.coerce.number().default(3000),
+  // Preprocess so an empty-string env var (common in stale .env files)
+  // falls back to the default instead of coercing to NaN.
+  NEXT_PUBLIC_WEB_PORT: z.preprocess(
+    (v) => (v === '' || v === undefined ? undefined : v),
+    z.coerce.number().default(3000),
+  ),
 } satisfies Record<`${typeof CLIENT_ENV_PREFIX}${string}`, any>)
 export const clientEnvVars = clientEnvSchema.keyof().options
 export type ClientEnvVar = (typeof clientEnvVars)[number]

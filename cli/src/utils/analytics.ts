@@ -136,15 +136,13 @@ function logAnalyticsError(error: unknown, context: AnalyticsErrorContext) {
 export function initAnalytics() {
   const { env, isProd, createClient, generateAnonymousId } = resolveDeps()
 
+  // BYOK fork: no central analytics. When PostHog isn't configured, leave the
+  // client null so trackEvent / flushAnalytics become no-ops (see below).
+  // Pre-existing SDK consumers who set both env vars keep working unchanged.
   if (!env.NEXT_PUBLIC_POSTHOG_API_KEY || !env.NEXT_PUBLIC_POSTHOG_HOST_URL) {
-    const error = new Error(
-      'NEXT_PUBLIC_POSTHOG_API_KEY or NEXT_PUBLIC_POSTHOG_HOST_URL is not set',
-    )
-    logAnalyticsError(error, {
-      stage: AnalyticsErrorStage.Init,
-      missingEnv: true,
-    })
-    throw error
+    anonymousId = generateAnonymousId()
+    identified = false
+    return
   }
 
   // Generate anonymous ID for pre-login tracking
@@ -184,15 +182,8 @@ export function trackEvent(
   const distinctId = getDistinctId()
 
   if (!client) {
-    if (isProd) {
-      const error = new Error('Analytics client not initialized')
-      logAnalyticsError(error, {
-        stage: AnalyticsErrorStage.Track,
-        event,
-        properties,
-      })
-      throw error
-    }
+    // BYOK fork: when PostHog isn't configured, tracking is a silent no-op.
+    // initAnalytics() leaves client=null deliberately in that case.
     return
   }
 
@@ -233,12 +224,10 @@ export function trackEvent(
 
 export function identifyUser(userId: string, properties?: Record<string, any>) {
   if (!client) {
-    const error = new Error('Analytics client not initialized')
-    logAnalyticsError(error, {
-      stage: AnalyticsErrorStage.Identify,
-      properties,
-    })
-    throw error
+    // BYOK fork: silent no-op when analytics isn't configured.
+    currentUserId = userId
+    identified = true
+    return
   }
 
   const { isProd } = resolveDeps()
