@@ -148,22 +148,53 @@ grep -n "useOpencodeGo\|useOpencodeZen" web/src/app/api/v1/chat/completions/_pos
 #### `cli/src/hooks/use-connection-status.ts`
 #### `cli/src/hooks/use-gravity-ad.ts`
 #### `cli/src/hooks/use-agent-validation.ts`
-#### `cli/src/hooks/use-auth-query.ts`
-#### `cli/src/hooks/use-usage-query.ts`
 
 Each hook computes a module-level `BYOK_AT_BOOT` flag and early-returns when set. If upstream rewrites the hook body, the early-return wrapper may end up in the wrong place after auto-merge.
 
 **Resolve:** apply upstream's new hook logic, then re-wrap the entire body with the `BYOK_AT_BOOT` guard at the top. The guard MUST be module-level (not per-render) — see [.context/decisions.md](./.context/decisions.md) "Module-level `BYOK_AT_BOOT` flag in React hooks" for why.
 
-Pattern to preserve (paraphrased):
+Since 0.1.10 the flag is env-first / profile-fallback (see [.context/decisions.md](./.context/decisions.md) "Propagate the BYOK env-gate to all backend-touching surfaces"). If upstream rewrites the gate body, preserve both branches — the env short-circuit covers fresh-install (no profile yet); the profile check only kicks in under `CODEBUFF_USE_BACKEND=1`:
 ```ts
-const BYOK_AT_BOOT = hasBYOKProfileAtModuleLoad();
+const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
+  try { return getActiveProfile() !== null } catch { return false }
+})()
 
 export function useXyz() {
   if (BYOK_AT_BOOT) return SAFE_DEFAULT;
   // ... upstream hook body ...
 }
 ```
+
+#### `cli/src/hooks/use-auth-query.ts`
+
+Not a `BYOK_AT_BOOT` hook. The fork's BYOK escape hatch is inline at the top of `validateApiKey()` — it returns a synthetic user (`{ id: 'byok-local', email: 'local@byok' }`) whenever `CODEBUFF_USE_BACKEND !== '1'` OR `getActiveProfile() !== null`, before any backend request is attempted.
+
+**Resolve:** keep the synthetic-user short-circuit at the very top of `validateApiKey`, ahead of any upstream-restructured retry / error / fetch logic. If upstream changes the function signature or return type, the synthetic must still match the new shape.
+
+#### `cli/src/hooks/use-usage-query.ts`
+
+Not a `BYOK_AT_BOOT` hook either. Uses a per-call `getActiveProfile()` check plus a `SENTINEL_BACKEND_URL` guard to return `BYOK_USAGE_RESPONSE` (zero-usage placeholder). Both guards are inside `fetchUsageData`.
+
+**Resolve:** preserve both early-returns at the top of `fetchUsageData`. The sentinel check is what saves a fresh install with no profile from hitting the unset URL — equivalent in spirit to the env-first gate the three `BYOK_AT_BOOT` hooks adopted in 0.1.10.
+
+#### `cli/src/app.tsx` — LoginModal render gate
+
+Since 0.1.10 the gate adds a `CODEBUFF_USE_BACKEND !== '1'` env-check so post-boot mutations to `isAuthenticated` (notably from `/logout`) cannot resurface the dead modal in BYOK mode. Without this gate, the pre-0.1.7 lockout returns via the `/logout` door.
+
+**Resolve:** keep the env-check guarding the entire `<LoginModal />` return. If upstream changes the render-gate conditions, re-add the env-check around whatever the new condition becomes:
+```tsx
+const byokModeNoBackend = process.env.CODEBUFF_USE_BACKEND !== '1'
+if (!byokModeNoBackend && /* upstream's conditions */) {
+  return <LoginModal ... />
+}
+```
+
+#### `cli/src/commands/command-registry.ts` — `/logout` handler
+
+Since 0.1.10 the `/logout` handler short-circuits in BYOK default mode with a pointer to `/providers:remove` / `/providers:list` and never calls `logoutMutation` or `setIsAuthenticated(false)`. Under `CODEBUFF_USE_BACKEND=1` the upstream behavior is preserved verbatim.
+
+**Resolve:** keep the BYOK early-return at the top of the handler. If upstream changes the logout flow (new mutation API, different state shape), the BYOK branch can stay unchanged — it returns before any of the upstream machinery runs.
 
 ### MEDIUM conflict risk
 
@@ -301,7 +332,8 @@ Run these before pushing `modded`. None should fail:
 | BYOK skip gate | `grep -n "shouldSkipBackend" sdk/src/impl/database.ts` | gate function present, called at backend entries |
 | Path C resolution | `grep -n "byokAgentBindings\[" sdk/src/impl/model-provider.ts` | per-agent lookup intact |
 | RunId synthesis | `grep -n "byok-" packages/agent-runtime/src/run-agent-step.ts` | UUID synth still in place |
-| BYOK_AT_BOOT gates | `grep -rn "BYOK_AT_BOOT" cli/src/hooks/` | 5 hooks still gated |
+| BYOK_AT_BOOT gates | `grep -rn "BYOK_AT_BOOT" cli/src/hooks/` | 3 hooks still gated (use-connection-status, use-gravity-ad, use-agent-validation) |
+| BYOK env-gate everywhere | `git grep "CODEBUFF_USE_BACKEND" cli/src/ sdk/src/` | gate present in index.tsx, app.tsx (LoginModal render), use-auth-query.ts, use-{connection-status,gravity-ad,agent-validation}.ts, command-registry.ts (/logout), sdk/src/impl/database.ts (shouldSkipBackend) |
 | `/providers` commands | `grep -n "providers:" cli/src/commands/command-registry.ts` | all 8 registered |
 | mod-* prebuild | `grep -n "mod-" cli/scripts/prebuild-agents.ts` | scan block present |
 | Smoke test | `cbm` → `/providers:list` → run a small prompt | binds + responds |
