@@ -3,7 +3,23 @@ import { useCallback, useState } from 'react'
 
 import { loadAgentDefinitions } from '../utils/local-agent-registry'
 import { logger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 import { filterNetworkErrors } from '../utils/validation-error-helpers'
+
+/**
+ * BYOK fork: remote validation POSTs to codebuff.com /api/v1/agents/validate
+ * which fails against the sentinel URL when no real backend is configured.
+ * The failure surfaces as a silent message-send block (errors: []). Skip
+ * remote validation when a BYOK profile is active and rely on the local
+ * schema check only.
+ */
+const BYOK_AT_BOOT: boolean = (() => {
+  try {
+    return getActiveProfile() !== null
+  } catch {
+    return false
+  }
+})()
 
 export type ValidationError = {
   id: string
@@ -40,7 +56,7 @@ export const useAgentValidation = (): UseAgentValidationResult => {
       const agentDefinitions = loadAgentDefinitions()
 
       const validationResult = await validateAgents(agentDefinitions, {
-        remote: true,
+        remote: !BYOK_AT_BOOT,
       })
 
       if (validationResult.success) {
