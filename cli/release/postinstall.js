@@ -30,7 +30,7 @@ console.log('\n');
 console.log('Quick start:');
 console.log('  1. cd to your project directory');
 console.log('  2. Run: cbm');
-console.log('  3. In the CLI: /providers:add <preset> <name> <apiKey>');
+console.log('  3. In the CLI: /providers:add <preset> <apiKey>');
 console.log('     Presets: openai, anthropic, openrouter, opencode-go, deepseek, gemini,');
 console.log('              mistral, together, groq, custom-openai');
 console.log('\n');

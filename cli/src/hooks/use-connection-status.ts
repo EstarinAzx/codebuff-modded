@@ -2,6 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 
 import { getCodebuffClient } from '../utils/codebuff-client'
 import { logger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
+
+/**
+ * BYOK fork: when an active provider profile exists at module load, the CLI
+ * routes requests directly to the provider's HTTP endpoint (Path C). There is
+ * no codebuff.com WebSocket to monitor, so the connection check is a no-op
+ * and the status indicator stays at "ok" instead of forever "connecting...".
+ */
+const BYOK_AT_BOOT: boolean = (() => {
+  try {
+    return getActiveProfile() !== null
+  } catch {
+    return false
+  }
+})()
 
 // Adaptive health check interval configuration
 // Progressively increases polling interval based on consecutive successful checks
@@ -49,6 +64,14 @@ export const useConnectionStatus = (
   const previousConnectedRef = useRef<boolean | null>(null)
 
   useEffect(() => {
+    // BYOK mode: skip the entire health-check loop. Pretend we're always
+    // connected so the status indicator never gets stuck on "connecting…".
+    if (BYOK_AT_BOOT) {
+      setIsConnected(true)
+      previousConnectedRef.current = true
+      return
+    }
+
     let isMounted = true
     let timeoutId: NodeJS.Timeout | null = null
     let consecutiveSuccesses = 0

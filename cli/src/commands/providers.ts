@@ -84,37 +84,72 @@ export function handleProvidersList(): string {
 }
 
 export function handleProvidersAdd(args: string): string {
-  // Syntax: /providers:add <preset> <name> <apiKey>
-  // For presets that require a baseUrl (custom-openai), use:
+  // Accepted forms:
+  //   /providers:add <preset> <apiKey>                         (name = preset display name)
+  //   /providers:add <preset> <name> <apiKey>
+  //   /providers:add custom-openai <apiKey-or-empty> <baseUrl> [model]
   //   /providers:add custom-openai <name> <apiKey> <baseUrl> [model]
-  const parts = args.trim().split(/\s+/)
-  if (parts.length < 1 || !parts[0]) {
+  const parts = args.trim().split(/\s+/).filter((p) => p.length > 0)
+  if (parts.length < 1) {
     return [
-      'Usage: /providers:add <preset> <name> <apiKey>',
+      'Usage: /providers:add <preset> <apiKey>',
+      '   or: /providers:add <preset> <name> <apiKey>',
       `Presets: ${listPresets().join(', ')}`,
       'For custom-openai: /providers:add custom-openai <name> <apiKey> <baseUrl> [model]',
     ].join('\n')
   }
 
-  const [presetRaw, name, apiKey, baseUrlArg, modelArg] = parts
+  const presetRaw = parts[0]
   if (!isPreset(presetRaw)) {
     return `Unknown preset "${presetRaw}". Available: ${listPresets().join(', ')}`
   }
-  if (!name) return 'Missing <name>. Usage: /providers:add <preset> <name> <apiKey>'
-
   const defaults = getPresetDefaults(presetRaw)
+
+  // Detect 2-arg shortcut: <preset> <apiKey>. Name defaults to preset display.
+  // For custom-openai the 3-arg form means <preset> <apiKey> <baseUrl>.
+  let name: string
+  let apiKey: string
+  let baseUrlArg: string | undefined
+  let modelArg: string | undefined
+
+  if (parts.length === 2) {
+    name = defaults.name
+    apiKey = parts[1]
+  } else if (presetRaw === 'custom-openai' && parts.length >= 3) {
+    // Disambiguate: 3rd arg is baseUrl if it looks like a URL; else it's apiKey.
+    const looksLikeUrl = (s: string) => /^https?:\/\//i.test(s)
+    if (looksLikeUrl(parts[2])) {
+      // <preset> <apiKey-or-empty> <baseUrl> [model]
+      name = defaults.name
+      apiKey = parts[1]
+      baseUrlArg = parts[2]
+      modelArg = parts[3]
+    } else {
+      // <preset> <name> <apiKey> <baseUrl> [model]
+      name = parts[1]
+      apiKey = parts[2] ?? ''
+      baseUrlArg = parts[3]
+      modelArg = parts[4]
+    }
+  } else {
+    name = parts[1]
+    apiKey = parts[2] ?? ''
+    baseUrlArg = parts[3]
+    modelArg = parts[4]
+  }
+
   if (defaults.requiresApiKey && !apiKey) {
-    return `Preset "${presetRaw}" requires an API key.`
+    return `Preset "${presetRaw}" requires an API key. Try: /providers:add ${presetRaw} <apiKey>`
   }
   if (presetRaw === 'custom-openai' && !baseUrlArg) {
-    return 'Preset "custom-openai" requires a baseUrl argument.'
+    return 'Preset "custom-openai" requires a baseUrl. Try: /providers:add custom-openai <apiKey> https://your-host/v1 [model]'
   }
 
   try {
     const profile = addProfile({
       preset: presetRaw,
       name,
-      apiKey: apiKey ?? '',
+      apiKey,
       baseUrl: baseUrlArg,
       model: modelArg,
       makeActive: true,

@@ -20,6 +20,7 @@ import {
 } from '../utils/auth'
 import { resetCodebuffClient } from '../utils/codebuff-client'
 import { logger as defaultLogger, loggerContext } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 
 import type { GetUserInfoFromApiKeyFn } from '@codebuff/common/types/contracts/database'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
@@ -66,6 +67,17 @@ export async function validateApiKey({
   getUserInfoFromApiKey = defaultGetUserInfoFromApiKey,
   logger = defaultLogger,
 }: ValidateAuthParams): Promise<ValidatedUserInfo> {
+  // BYOK mode: no backend to validate against. Return synthetic user
+  // immediately so the auth query never enters its retry loop and the
+  // status indicator stays "ok" instead of forever "retrying…".
+  try {
+    if (getActiveProfile()) {
+      return { id: 'byok-local', email: 'local@byok' }
+    }
+  } catch {
+    /* ignore — fall through to real validation */
+  }
+
   const requestedFields = ['id', 'email'] as const
 
   try {

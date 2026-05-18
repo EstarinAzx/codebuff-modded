@@ -192,7 +192,7 @@ const ALL_SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'providers:add',
     label: 'providers:add',
-    description: 'Add a BYOK profile: <preset> <name> <apiKey>',
+    description: 'Add a BYOK profile: <preset> <apiKey> (or <preset> <name> <apiKey>)',
   },
   {
     id: 'providers:select',
