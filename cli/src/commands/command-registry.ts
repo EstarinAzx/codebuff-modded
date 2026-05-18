@@ -6,6 +6,16 @@ import { handleHelpCommand } from './help'
 import { handleImageCommand } from './image'
 import { handleInitializationFlowLocally } from './init'
 import { buildInterviewPrompt, buildPlanPrompt, buildReviewPromptFromArgs } from './prompt-builders'
+import {
+  handleLoginBYOKHint,
+  handleModelCommand,
+  handleProvidersAdd,
+  handleProvidersList,
+  handleProvidersRefreshModels,
+  handleProvidersRemove,
+  handleProvidersSelect,
+  handleProvidersTest,
+} from './providers'
 import { runBashCommand } from './router'
 import { handleUsageCommand } from './usage'
 import { returnToFreebuffLanding } from '../hooks/use-freebuff-session'
@@ -172,6 +182,14 @@ const FREEBUFF_REMOVED_COMMANDS = new Set([
   'image',
   'publish',
   'gpt-5-agent',
+  // BYOK commands are non-applicable in freebuff (free-tier ChatGPT-only path).
+  'providers',
+  'providers:add',
+  'providers:select',
+  'providers:remove',
+  'providers:test',
+  'providers:refresh-models',
+  'model',
 ])
 
 const FREEBUFF_ONLY_COMMANDS = new Set([
@@ -253,10 +271,10 @@ const ALL_COMMANDS: CommandDefinition[] = [
     handler: (params) => {
       params.setMessages((prev) => [
         ...prev,
-        getSystemMessage(
-          "You're already in the app. Use /logout to switch accounts.",
-        ),
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleLoginBYOKHint()),
       ])
+      params.saveToHistory(params.inputValue.trim())
       clearInput(params)
     },
   }),
@@ -610,6 +628,95 @@ const ALL_COMMANDS: CommandDefinition[] = [
         // The hook surfaces poll errors via the session store; nothing to do
         // here beyond letting the chat history reflect the attempt.
       })
+    },
+  }),
+
+  // ── BYOK provider commands (Phase 3a) ─────────────────────────────────
+  defineCommand({
+    name: 'providers',
+    handler: (params) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersList()),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommandWithArgs({
+    name: 'providers:add',
+    handler: (params, args) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersAdd(args)),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommandWithArgs({
+    name: 'providers:select',
+    handler: (params, args) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersSelect(args)),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommandWithArgs({
+    name: 'providers:remove',
+    handler: (params, args) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersRemove(args)),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommand({
+    name: 'providers:test',
+    handler: async (params) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage('Testing active profile…'),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+      const result = await handleProvidersTest()
+      params.setMessages((prev) => [...prev, getSystemMessage(result)])
+    },
+  }),
+  defineCommand({
+    name: 'providers:refresh-models',
+    handler: (params) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersRefreshModels()),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommandWithArgs({
+    name: 'model',
+    handler: async (params, args) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+      const result = await handleModelCommand(args)
+      params.setMessages((prev) => [...prev, getSystemMessage(result)])
     },
   }),
 ]

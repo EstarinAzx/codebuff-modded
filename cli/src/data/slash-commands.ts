@@ -41,6 +41,14 @@ const FREEBUFF_REMOVED_COMMAND_IDS = new Set([
   'image',
   'publish',
   'init',
+  // BYOK commands — N/A in freebuff (free-tier ChatGPT-only path).
+  'providers',
+  'providers:add',
+  'providers:select',
+  'providers:remove',
+  'providers:test',
+  'providers:refresh-models',
+  'model',
 ])
 
 const FREEBUFF_ONLY_COMMAND_IDS = new Set([
@@ -173,6 +181,43 @@ const ALL_SLASH_COMMANDS: SlashCommand[] = [
     id: 'theme:toggle',
     label: 'theme:toggle',
     description: 'Toggle between light and dark mode',
+  },
+
+  // BYOK provider commands (Phase 3a — text-mode; wizard panel in 3b).
+  {
+    id: 'providers',
+    label: 'providers',
+    description: 'List your BYOK provider profiles',
+  },
+  {
+    id: 'providers:add',
+    label: 'providers:add',
+    description: 'Add a BYOK profile: <preset> <name> <apiKey>',
+  },
+  {
+    id: 'providers:select',
+    label: 'providers:select',
+    description: 'Switch active BYOK profile by id/name',
+  },
+  {
+    id: 'providers:remove',
+    label: 'providers:remove',
+    description: 'Remove a BYOK profile by id/name',
+  },
+  {
+    id: 'providers:test',
+    label: 'providers:test',
+    description: 'Send a 1-token ping with the active BYOK profile',
+  },
+  {
+    id: 'providers:refresh-models',
+    label: 'providers:refresh-models',
+    description: 'Clear cached /v1/models for the active profile',
+  },
+  {
+    id: 'model',
+    label: 'model',
+    description: 'Show or swap the model for the active BYOK profile',
   },
   {
     id: 'end-session',
