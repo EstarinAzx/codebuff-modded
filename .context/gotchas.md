@@ -51,6 +51,10 @@ Adding a new fork-local agent: if the id starts with `mod-`, drop the file in `.
 
 Several CLI hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) compute a `BYOK_AT_BOOT` module-level flag once at process start. A user who registers their first BYOK profile via `/providers:add` mid-session will continue to see ads / "connecting…" / silent validation failures until they restart the CLI. The agent-runtime side (SDK Path C dispatch) DOES re-check the singleton per request and works without restart — only the React-side gates are pinned at boot.
 
+## BYOK runId must be truthy, not just non-null
+
+`packages/agent-runtime/src/run-programmatic-step.ts:130-132` throws `Agent state has no run ID` if `agentState.runId` is falsy — including the empty string. `run-agent-step.ts:685` therefore synthesizes a `byok-<agentId>-<uuid>` fallback whenever `startAgentRun()` returns null. Anyone tempted to "simplify" this back to `?? ''` will re-introduce the 0.1.5 crash on every spawned `handleSteps` sub-agent (thinker, file-picker, code-searcher, code-reviewer). Empty-string keys would also collide in `runIdToGenerator` across concurrent programmatic agents — bad. Keep the UUID synthesis.
+
 ## Per-agent BYOK bindings are pushed at boot, but live on the SDK side
 
 `setByokAgentBindings()` is called from `cli/src/init/init-app.ts` at startup and re-called by every `/providers:bind` / `/providers:unbind` / `/providers:remove` handler. The SDK reads the map per request, so binding changes take effect on the next agent spawn without restart.

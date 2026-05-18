@@ -9,6 +9,14 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-18 — Synthesize runId UUID in BYOK instead of empty-string coercion (0.1.6)
+
+**Decision:** When `startAgentRun()` returns null (BYOK skips central run tracking), mint a process-local UUID `byok-<agentTemplate.id>-<uuid>` instead of coercing to `''`. UUID source is `crypto.randomUUID()` when available, Math.random+Date.now otherwise. The id is never persisted — it only keys the in-memory `runIdToGenerator` map and propagates through `ancestorRunIds`.
+
+**Why:** The 0.1.4 fix coerced null → `''` to keep the parent agent's loop alive past the `Failed to start agent run` throw. That kept the orchestrator working but left `agentState.runId` falsy, which immediately re-triggers `Agent state has no run ID` at `packages/agent-runtime/src/run-programmatic-step.ts:131` the moment a sub-agent with `handleSteps` (thinker, file-picker, code-searcher, code-reviewer) gets spawned. Empty-string would also collide in the generator map across concurrent programmatic agents. Two alternatives considered: (a) loosen the guard to `!= null` so `''` passes — rejected because generator-map collisions silently cross-contaminate; (b) widen the `runId` type to `string | null` across agent-runtime — rejected as high-blast-radius. UUID synthesis is the smallest change with no downstream contract impact.
+
+**Reversibility:** easy — revert the 17-line edit in `run-agent-step.ts` to go back to the `?? ''` behavior, but spawned sub-agents will crash again until a different fix lands. PORT marker not needed because the change is inside a code path upstream doesn't exercise (upstream always has a real runId from the codebuff.com backend).
+
 ## 2026-05-18 — Per-agent BYOK profile bindings (0.1.5)
 
 **Decision:** Allow agent-id → profile bindings in `providers.json` (schema v2). SDK Path C resolves `byokAgentBindings[params.agentId] ?? activeByokProfile` so a spawned sub-agent (file-picker, code-searcher, …) can route through a different provider/model than the orchestrating top-level agent. CLI surfaces this via `/providers:bind`, `/providers:unbind`, `/providers:bindings`.

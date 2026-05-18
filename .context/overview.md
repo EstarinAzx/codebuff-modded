@@ -19,6 +19,7 @@ Upstream is `CodebuffAI/codebuff` (origin points at `EstarinAzx/codebuff`). Dive
 - [[active-work]] — what's in flight on the `modded` branch
 - [[decisions]] — rationale for fork-local edits
 - [[gotchas]] — non-obvious behaviors when touching this repo
+- [MERGE-STRATEGY.md](../MERGE-STRATEGY.md) — how to sync upstream → main → modded safely (read BEFORE any upstream merge)
 
 ## Authoritative project docs (do not duplicate here)
 
