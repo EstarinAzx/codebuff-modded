@@ -67,15 +67,21 @@ export async function validateApiKey({
   getUserInfoFromApiKey = defaultGetUserInfoFromApiKey,
   logger = defaultLogger,
 }: ValidateAuthParams): Promise<ValidatedUserInfo> {
-  // BYOK mode: no backend to validate against. Return synthetic user
-  // immediately so the auth query never enters its retry loop and the
-  // status indicator stays "ok" instead of forever "retrying…".
+  // BYOK mode: no backend to validate against. Return a synthetic user
+  // immediately whenever the codebuff.com backend is not in use (the fork
+  // default) OR an active BYOK profile is registered, so the auth query
+  // never enters its retry loop and never flips isAuthenticated to false
+  // (which would bounce the user to the unreachable LoginModal). Real
+  // validation only runs under the explicit CODEBUFF_USE_BACKEND=1 hatch.
+  const byokMode = process.env.CODEBUFF_USE_BACKEND !== '1'
+  let hasProfile = false
   try {
-    if (getActiveProfile()) {
-      return { id: 'byok-local', email: 'local@byok' }
-    }
+    hasProfile = getActiveProfile() != null
   } catch {
-    /* ignore — fall through to real validation */
+    /* corrupt providers.json — ignore */
+  }
+  if (byokMode || hasProfile) {
+    return { id: 'byok-local', email: 'local@byok' }
   }
 
   const requestedFields = ['id', 'email'] as const

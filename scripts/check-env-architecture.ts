@@ -83,12 +83,25 @@ const packageConfigs: PackageConfig[] = [
     additionalProcessEnvAllowlist: [
       'cli/src/init/init-direnv.ts', // Loads direnv vars into process.env at startup
       'cli/src/pre-init/tree-sitter-wasm.ts', // Stashes embedded wasm path for code-map's locateFile callback
+      // BYOK fork: standalone provider config gated on raw env vars
+      // (CODEBUFF_USE_BACKEND escape hatch, CODEBUFF_PROVIDERS_PATH override).
+      // Kept raw to match the SDK-side BYOK gate; not part of the CLI env schema.
+      'cli/src/index.tsx',
+      'cli/src/hooks/use-auth-query.ts',
+      'cli/src/utils/providers.ts',
+      'cli/src/utils/providers-models.ts',
     ],
   },
   {
     name: 'sdk',
     rootDir: path.join(cwd, 'sdk', 'src'),
     enforceRestrictedImports: true,
+    additionalProcessEnvAllowlist: [
+      // BYOK fork: shouldSkipBackend() / Path C gate on the raw
+      // CODEBUFF_USE_BACKEND escape hatch.
+      'sdk/src/impl/database.ts',
+      'sdk/src/impl/model-provider.ts',
+    ],
   },
 ]
 

@@ -39,6 +39,7 @@ import { getCliEnv } from './utils/env'
 import { initializeAgentRegistry } from './utils/local-agent-registry'
 import { clearLogFile, logger } from './utils/logger'
 import { shouldShowProjectPicker } from './utils/project-picker'
+import { getActiveProfile } from './utils/providers'
 import { saveRecentProject } from './utils/recent-projects'
 import { installProcessCleanupHandlers, TERMINAL_RESET_SEQUENCES } from './utils/renderer-cleanup'
 import { initializeSkillRegistry } from './utils/skill-registry'
@@ -370,6 +371,31 @@ async function main(): Promise<void> {
       React.useState(showProjectPicker)
 
     React.useEffect(() => {
+      // BYOK fork: the codebuff.com backend is not reachable, so the login
+      // flow can never succeed. Unless the backend is explicitly re-enabled
+      // via CODEBUFF_USE_BACKEND=1, never gate the app behind LoginModal —
+      // route the user straight in, where `/providers:add` registers a
+      // provider. A user with no profile and no credentials would otherwise
+      // be trapped on a LoginModal whose POST to /api/auth/cli/code cannot
+      // connect (no backend host configured).
+      const useBackend = process.env.CODEBUFF_USE_BACKEND === '1'
+
+      let hasByokProfile = false
+      try {
+        hasByokProfile = getActiveProfile() != null
+      } catch {
+        // corrupt providers.json — ignore, still skip the login gate
+      }
+
+      if (hasByokProfile || !useBackend) {
+        setRequireAuth(false)
+        // Banner is cosmetic and only renders inside LoginModal (which no
+        // longer gates the app); keep it off in pure BYOK mode.
+        setHasInvalidCredentials(false)
+        return
+      }
+
+      // Backend mode (CODEBUFF_USE_BACKEND=1): preserve the upstream gate.
       const apiKey = getAuthTokenDetails().token ?? ''
 
       if (!apiKey) {
