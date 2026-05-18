@@ -9,6 +9,23 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-19 — Propagate the BYOK env-gate to all backend-touching surfaces (0.1.10)
+
+**Decision:** Every CLI surface that talks to codebuff.com — three React hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) and the `LoginModal` render gate in `app.tsx` — now short-circuits when `process.env.CODEBUFF_USE_BACKEND !== '1'`, independent of whether a BYOK profile is registered. The hooks' `BYOK_AT_BOOT` flags previously gated *only* on `getActiveProfile() !== null`. The `LoginModal` gate previously only checked `requireAuth`/`isAuthenticated` without re-checking the env, so the `/logout` handler's `setIsAuthenticated(false)` could still surface the modal post-boot. The `/logout` command itself now short-circuits in BYOK default mode with a pointer to `/providers:remove` instead of mutating auth state.
+
+**Why:** 0.1.7 added the `CODEBUFF_USE_BACKEND !== '1'` env-gate at two spots (`index.tsx` startup, `validateApiKey` short-circuit) and explicitly stated "LoginModal is unreachable in BYOK mode." But the gate was only applied at boot to those two surfaces. A fresh-device install (no profile *yet*) still:
+- pinged the unset health-check endpoint forever → status indicator stuck on "connecting…" (`use-connection-status`),
+- hit the unset ads endpoint in a loop (`use-gravity-ad`),
+- silently failed remote agent validation, blocking message send with `errors: []` (`use-agent-validation`).
+
+Worse, the user could *reach* the dead `LoginModal` again by running `/logout` — which calls `setIsAuthenticated(false)`, satisfying the modal's render gate in `app.tsx`. The lockout symptom of 0.1.6 was back, just via a different door.
+
+Three alternatives considered: (a) widen the hooks' `BYOK_AT_BOOT` to react to mid-session profile additions — rejected because Rules-of-Hooks forbids conditional hook execution flipping mid-render (the comment in `use-gravity-ad.ts` explicitly documents this trade-off); (b) gate everything on `getActiveProfile()` and require users to register a profile before the CLI does anything — rejected because that's exactly the lockout 0.1.7 fixed; (c) propagate the existing env-gate everywhere the backend is touched — picked. Matches `shouldSkipBackend()` precedent on the SDK side and is deterministic at boot.
+
+**Trade-off accepted:** "BYOK_AT_BOOT" is now a slight misnomer in those three hooks — the flag fires whenever the backend is *disabled* at boot, regardless of profile state. Name kept to avoid renaming churn; updated file-top docstrings to explain both branches. `/logout` in BYOK mode no longer clears `credentials.json` (since the new branch returns before calling `logoutMutation`). Acceptable: BYOK installs don't have a `credentials.json` in the first place, and old leftover files don't hurt anything because `validateApiKey` short-circuits to the synthetic user before reading them.
+
+**Reversibility:** easy — revert the env-check in each of the five locations. Hooks would fall back to the profile-only gate (still works once a profile exists). The `/logout` BYOK branch is a self-contained early-return that can be deleted to restore the upstream logout flow.
+
 ## 2026-05-19 — Banner mark is "CODEBUFF - M", not "- MODDED" (0.1.8)
 
 **Decision:** The full ASCII logo (`LOGO_CODEBUFF` in `cli/src/login/constants.ts`) renders "CODEBUFF - M" — the modded suffix abbreviated to a single block letter. The small ASCII logo renders "CBM". The full word "MODDED" in block ASCII was tried and rejected; it pushed the banner to ~135 cols.

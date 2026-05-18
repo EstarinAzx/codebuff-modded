@@ -5,12 +5,20 @@ import { logger } from '../utils/logger'
 import { getActiveProfile } from '../utils/providers'
 
 /**
- * BYOK fork: when an active provider profile exists at module load, the CLI
- * routes requests directly to the provider's HTTP endpoint (Path C). There is
- * no codebuff.com WebSocket to monitor, so the connection check is a no-op
- * and the status indicator stays at "ok" instead of forever "connecting...".
+ * BYOK fork: skip the codebuff.com health-check loop whenever the backend
+ * is not in use. Two ways to be in BYOK mode at boot:
+ *   1. The default — `CODEBUFF_USE_BACKEND !== '1'`. The codebuff.com host
+ *      isn't configured at all, so polling it sticks the status indicator
+ *      on "connecting…" forever (regression seen on fresh installs with no
+ *      profile yet, before the user runs `/providers:add`).
+ *   2. An active BYOK profile is registered. Requests route through Path C
+ *      directly to the provider, so there's no upstream socket to monitor.
+ * Gating on either condition keeps a profile-less fresh install out of the
+ * dead health-check loop, and still skips polling under the explicit
+ * `CODEBUFF_USE_BACKEND=1` escape hatch when a profile is also active.
  */
 const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
   try {
     return getActiveProfile() !== null
   } catch {

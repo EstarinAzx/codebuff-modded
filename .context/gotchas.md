@@ -47,9 +47,13 @@ The script at `cli/scripts/prebuild-agents.ts` walks the upstream `agents/` dire
 
 Adding a new fork-local agent: if the id starts with `mod-`, drop the file in `.agents/` and re-run `bun run scripts/prebuild-agents.ts` before `build:binary`. Other `.agents/` files (claude-code-cli.ts, codex-cli.ts, notion-*) are deliberately excluded from the bundle — they're user-side overrides, not first-party fork templates.
 
-## Adding a profile mid-session leaves stale BYOK gates in place
+## `BYOK_AT_BOOT` in React hooks is now env-first, profile-second
 
-Several CLI hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) compute a `BYOK_AT_BOOT` module-level flag once at process start. A user who registers their first BYOK profile via `/providers:add` mid-session will continue to see ads / "connecting…" / silent validation failures until they restart the CLI. The agent-runtime side (SDK Path C dispatch) DOES re-check the singleton per request and works without restart — only the React-side gates are pinned at boot.
+Since 0.1.10, the `BYOK_AT_BOOT` flag in `use-connection-status`, `use-gravity-ad`, and `use-agent-validation` returns `true` whenever `process.env.CODEBUFF_USE_BACKEND !== '1'` *regardless* of profile state, falling back to `getActiveProfile() !== null` only under the explicit backend escape hatch. The name is now slightly misleading — the flag fires whenever the codebuff.com backend is disabled at boot, not strictly when BYOK is "active." Kept the name to avoid renaming churn. If you add a new backend-touching hook that needs to be skipped in fork default mode, mirror the same pattern (env check first, profile check as a fallback under `CODEBUFF_USE_BACKEND=1`).
+
+## Adding a profile mid-session still leaves stale BYOK gates (escape-hatch only)
+
+The boot-time pinning trade-off only matters now when running under the explicit `CODEBUFF_USE_BACKEND=1` escape hatch — a user there who registers their first BYOK profile via `/providers:add` mid-session continues to see ads / "connecting…" / silent validation failures until they restart the CLI. In default BYOK mode the env-gate fires first so this is moot. The agent-runtime side (SDK Path C dispatch) DOES re-check the singleton per request and works without restart — only the React-side gates are pinned at boot.
 
 ## BYOK runId must be truthy, not just non-null
 
@@ -61,11 +65,16 @@ Several CLI hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validat
 
 But the *React-side* `BYOK_AT_BOOT` gates in `use-connection-status`, `use-gravity-ad`, `use-agent-validation` are still pinned at module load (see the existing gotcha below about mid-session profiles). Adding bindings mid-session does not flip those gates — only adding the *first* profile does. Same restart caveat applies if you go from zero profiles to bindings in one session.
 
-## Zero BYOK profiles = lockout pre-0.1.7 (fixed in 0.1.7)
+## Zero BYOK profiles = lockout pre-0.1.7 (fully closed in 0.1.10)
 
 Before 0.1.7, a user with **no provider profile** AND no codebuff.com `credentials.json` was hard-locked out of the CLI. The startup gate (`index.tsx`) and `validateApiKey` (`use-auth-query.ts`) only had BYOK escape hatches that gated on `getActiveProfile()` truthy — so with zero profiles the CLI fell back to the dead codebuff.com `LoginModal`, whose `POST /api/auth/cli/code` hits `http://127.0.0.1:1` (unset backend) and fails. `LoginModal` renders before the chat input, so there was no in-app way to reach `/providers:add`. Triggered by: fresh `npm i -g codebuff-mod`, `/logout`, or `/providers:remove`-ing the last profile.
 
-0.1.7 fixed it (see [[decisions]]): the gate is skipped whenever `CODEBUFF_USE_BACKEND !== '1'`. If you ever need to manually unlock an older binary, hand-write `~/.config/manicode/providers.json` with one structurally-valid profile (`sanitizeProfile` requires only `id`, `name`, `preset`, `provider`, `baseUrl` — `apiKey` may be empty) and set `activeProfileId` to its id.
+0.1.7 closed the boot-time lockout: `index.tsx` and `validateApiKey` skip the gate whenever `CODEBUFF_USE_BACKEND !== '1'`. 0.1.10 closed two follow-on holes that 0.1.7 missed:
+
+1. **"Connecting…" stuck on fresh installs.** Three React hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) only had profile-based BYOK gates — fresh install (no profile yet) bypassed the gates and hit the unset codebuff.com endpoints in a loop. 0.1.10 made these env-first (see the `BYOK_AT_BOOT` gotcha above).
+2. **`/logout` re-triggered the lockout.** The `/logout` handler called `setIsAuthenticated(false)`, which satisfied the `LoginModal` render gate in `app.tsx` (`requireAuth !== null && isAuthenticated === false && authStatus === 'ok'`). 0.1.10 added a `CODEBUFF_USE_BACKEND !== '1'` env-check to that gate and short-circuited the `/logout` command itself in BYOK default mode (it now prints a pointer to `/providers:remove` instead of mutating auth state).
+
+If you ever need to manually unlock an older binary (pre-0.1.10), hand-write `~/.config/manicode/providers.json` with one structurally-valid profile (`sanitizeProfile` requires only `id`, `name`, `preset`, `provider`, `baseUrl` — `apiKey` may be empty) and set `activeProfileId` to its id.
 
 ## `.context/active-work.md` rolling state — past sessions are gone
 

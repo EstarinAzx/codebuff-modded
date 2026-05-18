@@ -25,10 +25,19 @@ const ZEROCLICK_IMPRESSIONS_URL = 'https://zeroclick.dev/api/v2/impressions'
  * /providers:add). When true, the ad hook returns a stable no-op shape and
  * never fires network requests against codebuff.com.
  *
+ * Two ways to be in BYOK at boot:
+ *   1. `CODEBUFF_USE_BACKEND !== '1'` — fork default. Ads pipeline points
+ *      at an unset host, so fetches just error in a loop. Skip outright.
+ *      Without this branch, a fresh install with no profile yet hits the
+ *      dead pipeline until the user runs `/providers:add` and restarts.
+ *   2. An active BYOK profile exists under the explicit backend escape
+ *      hatch. Path C handles requests directly, no ad-server needed.
+ *
  * Trade-off: a user who registers their first BYOK profile mid-session
  * keeps seeing ads until they restart the CLI. Acceptable in v1.
  */
 const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
   try {
     return getActiveProfile() !== null
   } catch {

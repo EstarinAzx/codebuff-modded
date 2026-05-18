@@ -288,6 +288,28 @@ const ALL_COMMANDS: CommandDefinition[] = [
     name: 'logout',
     aliases: ['signout'],
     handler: (params) => {
+      // BYOK fork: `/logout` targets the codebuff.com session. In default
+      // BYOK mode that session does not exist — flipping isAuthenticated to
+      // false would only matter for the LoginModal gate, which app.tsx now
+      // refuses to render in BYOK mode anyway. Surface a useful pointer to
+      // /providers:remove instead of the silent state flip + "Logged out."
+      // that confused users on fresh installs.
+      const byokModeNoBackend = process.env.CODEBUFF_USE_BACKEND !== '1'
+      if (byokModeNoBackend) {
+        params.setMessages((prev) => [
+          ...prev,
+          getUserMessage(params.inputValue.trim()),
+          getSystemMessage(
+            'BYOK mode — no codebuff.com session to log out of. ' +
+              'Use `/providers:remove <id>` to drop a saved provider profile, ' +
+              'or `/providers:list` to see what you have configured.',
+          ),
+        ])
+        params.saveToHistory(params.inputValue.trim())
+        clearInput(params)
+        return
+      }
+
       params.abortControllerRef.current?.abort()
       params.stopStreaming()
       params.setCanProcessQueue(false)

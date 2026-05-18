@@ -280,8 +280,19 @@ export const App = ({
   }
 
   // Render login modal when not authenticated AND auth service is reachable
-  // Don't show login modal during network outages OR while retrying
+  // Don't show login modal during network outages OR while retrying.
+  //
+  // BYOK fork: even after `/logout` flips isAuthenticated back to false at
+  // runtime, never surface the dead LoginModal in BYOK mode — the modal's
+  // POST /api/auth/cli/code targets an unset backend host and traps the
+  // user with no way to reach `/providers:add`. index.tsx already pins
+  // requireAuth=false at boot when CODEBUFF_USE_BACKEND !== '1', but the
+  // /logout handler still calls setIsAuthenticated(false) afterwards
+  // (upstream behavior we preserve under the backend escape hatch). Gate
+  // the render on the same env so the lockout is impossible by construction.
+  const byokModeNoBackend = process.env.CODEBUFF_USE_BACKEND !== '1'
   if (
+    !byokModeNoBackend &&
     requireAuth !== null &&
     isAuthenticated === false &&
     authStatus === 'ok'

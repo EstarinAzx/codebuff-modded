@@ -10,10 +10,16 @@ import { filterNetworkErrors } from '../utils/validation-error-helpers'
  * BYOK fork: remote validation POSTs to codebuff.com /api/v1/agents/validate
  * which fails against the sentinel URL when no real backend is configured.
  * The failure surfaces as a silent message-send block (errors: []). Skip
- * remote validation when a BYOK profile is active and rely on the local
- * schema check only.
+ * remote validation in both BYOK modes:
+ *   1. Default `CODEBUFF_USE_BACKEND !== '1'` — no backend at all, so the
+ *      remote endpoint is unreachable even when no profile is registered
+ *      yet (fresh-install case before `/providers:add`).
+ *   2. Active BYOK profile under the `CODEBUFF_USE_BACKEND=1` escape hatch
+ *      — Path C bypasses the validation endpoint anyway.
+ * Local schema check still runs in both cases.
  */
 const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
   try {
     return getActiveProfile() !== null
   } catch {
