@@ -3,58 +3,58 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
 tags: [context, active-work]
+ship: 0.1.9
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7_
-_At commit: 92c8b45af (`modded` tip) — 0.1.8 changes uncommitted, ship in progress_
+_At commit: `modded` tip — 0.1.9 changes being committed this session_
 
 ## Current focus
 
-Shipping `codebuff-mod@0.1.8` — a banner rebrand. The CLI logo now reads
-**"CODEBUFF - M"** in full ASCII (the modded mark), and the narrow small
-ASCII logo reads **"CBM"**. Code + typecheck done; publish / commit / push
-is the in-flight final step.
+Shipping `codebuff-mod@0.1.9` — a one-line bug fix for the 0.1.8 banner
+rebrand. 0.1.8 shipped the wide "CODEBUFF - M" ASCII logo but it never
+rendered: `useLogo` was budgeted against `contentMaxWidth` (hard-capped
+at 80 cols in `use-terminal-dimensions.ts`), while the banner is ~92 wide.
+Result: always fell back to the small "CBM" logo regardless of terminal
+size. 0.1.9 budgets the header logo against `terminalWidth - 4` instead.
 
 ## State
 
-- **In flight:** 0.1.8 ship — publish to npm, commit, push (this session,
-  after `/context-update`).
-- **Done this session (0.1.8 banner rebrand):**
-  - `cli/src/login/constants.ts` — `LOGO_CODEBUFF` is now ASCII
-    "CODEBUFF - M" (~92 cols wide; dropped from the longer "MODDED" idea
-    because the full word blew past terminal width). `LOGO_SMALL_CODEBUFF`
-    is now ASCII "CBM" (was "CB"). Comments updated. Freebuff logos
-    untouched.
-  - `cli/src/hooks/use-logo.tsx` — full-logo width threshold raised
-    `70` → `92` (the wider banner needs the room). Small-logo threshold
-    unchanged at `20`. Docstring updated.
-  - `sdk/src/impl/__tests__/database-byok-skip.test.ts` — added
-    `userId: undefined` to the `finishAgentRun` + `addAgentStep` mock cast
-    objects (lines ~82, ~97). Cleared the pre-existing carry-over
-    typecheck failure (old item 3).
-  - Version bumped 0.1.7 → 0.1.8 in `cli/package.json` +
-    `cli/release/package.json`.
-  - `bun run typecheck` fully green (all workspaces, including
-    `@codebuff/sdk` which previously failed on the two test mocks).
-- **Behavior change:** terminals narrower than 92 cols now render the
-  small "CBM" logo instead of the full banner (was 70-col threshold).
-  Deliberate, user-accepted tradeoff.
+- **In flight:** 0.1.9 ship — build binaries done, commit / push / tag /
+  GH release / npm publish in progress this session.
+- **Done this session:**
+  - **0.1.8 (shipped):** banner rebrand. `LOGO_CODEBUFF` → ASCII
+    "CODEBUFF - M" (~92 cols; the full word "MODDED" was rejected — block
+    ASCII would be ~135 cols). `LOGO_SMALL_CODEBUFF` → "CBM" (was "CB").
+    Full-logo width threshold in `use-logo.tsx` raised `70` → `92`. Also
+    cleared a pre-existing `@codebuff/sdk` typecheck failure
+    (`database-byok-skip.test.ts` — added `userId: undefined` to two mock
+    casts). Published, GH release `v0.1.8`, commit `6a40f25a4`.
+  - **0.1.9 (shipping now):** `cli/src/app.tsx` — header `useLogo` now
+    gets `availableWidth: terminalWidth - 4` instead of `contentMaxWidth`.
+    The logo is a full-width banner, not confined to the 80-col content
+    column, so the 92-wide variant could never fit. `contentMaxWidth`
+    dropped from the `useTerminalDimensions()` destructure (now unused in
+    app.tsx). Modal `useLogo` callers (login-modal, project-picker,
+    waiting-room, freebuff-superseded) keep `contentMaxWidth` — correct,
+    modals stay narrow and show the small logo.
+  - `cli/src/login/constants.ts` — user hand-fixed an off-by-one in the M
+    glyph's rows 3-4 alignment. Correct, kept.
+  - Version bumped 0.1.8 → 0.1.9.
+- **Behavior:** the full "CODEBUFF - M" banner now needs a terminal
+  ≥ ~96 cols wide (`terminalWidth - 4 ≥ 92`); narrower shows small "CBM".
 - **Blocked:** Nothing.
 
 ## Pick up here
 
-After publish/commit/push completes:
+After 0.1.9 publish completes:
 
-1. Build the 3 binaries (Win x64 + Linux x64/arm64) via the `C:\cb`
-   junction, hand-tar into `dist-binaries/*.tar.gz`, `gh release create
-   v0.1.8`. (See [[stack]] release commands + [[gotchas]] cross-build
-   workarounds. NOTE: as of this writing only the npm launcher publish +
-   git commit/push were requested — confirm with user whether the GH
-   release binaries for v0.1.8 still need building.)
+1. Confirm the user sees the full "CODEBUFF - M" banner on a wide
+   (≥96-col) terminal and "CBM" when narrowed.
 2. Swap the user-side local binary at `~/.config/manicode/codebuff-mod.exe`
-   to 0.1.8 once the release is up (keep 0.1.7 as `.exe.017`).
+   to 0.1.9 (keep prior as `.exe.018`).
 3. Open questions below.
 
 ## Open questions (carry-over)

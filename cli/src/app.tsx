@@ -57,7 +57,7 @@ export const App = ({
   showProjectPicker,
   onProjectChange,
 }: AppProps) => {
-  const { contentMaxWidth, terminalWidth } = useTerminalDimensions()
+  const { terminalWidth } = useTerminalDimensions()
   const theme = useTheme()
 
   // Sheen animation state for the logo
@@ -74,7 +74,12 @@ export const App = ({
   })
 
   const { component: logoComponent } = useLogo({
-    availableWidth: contentMaxWidth,
+    // The header logo is a full-width banner — it is not confined to the
+    // 80-col content column (contentMaxWidth), so the wide "CODEBUFF - M"
+    // ASCII variant can never fit there. Budget it against the real
+    // terminal width minus the header box's paddingLeft/Right (1+1) plus
+    // a 2-col safety margin.
+    availableWidth: terminalWidth - 4,
     accentColor,
     blockColor,
     applySheenToChar,
