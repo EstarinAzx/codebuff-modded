@@ -679,17 +679,24 @@ export async function loopAgentSteps(
     }
   }
 
-  // BYOK mode: startAgentRun returns null (no central run tracking). Coerce to
-  // empty string so downstream string-typed call sites stay happy; skipped
-  // backend functions early-return on apiKey check anyway.
-  const runId = (await startAgentRun({
+  // BYOK mode: startAgentRun returns null (no central run tracking). Mint a
+  // process-local UUID fallback so downstream code that keys on runId
+  // (runIdToGenerator in run-programmatic-step.ts, sub-agent spawn paths)
+  // stays correct — empty string would collide across concurrent programmatic
+  // agents and re-trigger the `Agent state has no run ID` throw on spawn.
+  const realRunId = await startAgentRun({
     ...params,
     agentId: agentTemplate.id,
     ancestorRunIds: initialAgentState.ancestorRunIds,
-  })) ?? ''
-  if (runId) {
-    initialAgentState.runId = runId
-  }
+  })
+  const runId =
+    realRunId ??
+    `byok-${agentTemplate.id}-${
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36)
+    }`
+  initialAgentState.runId = runId
 
   let cachedAdditionalToolDefinitions: CustomToolDefinitions | undefined
   // Use parent's tools for prompt caching when inheritParentSystemPrompt is true
