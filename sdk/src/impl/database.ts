@@ -16,6 +16,7 @@ import {
   RETRY_BACKOFF_BASE_DELAY_MS,
   RETRY_BACKOFF_MAX_DELAY_MS,
 } from '../retry-config'
+import { getActiveByokProfile } from './model-provider'
 
 import type {
   AddAgentStepFn,
@@ -28,6 +29,34 @@ import type {
 } from '@codebuff/common/types/contracts/database'
 import type { DynamicAgentTemplate } from '@codebuff/common/types/dynamic-agent-template'
 import type { ParamsOf } from '@codebuff/common/types/function-params'
+
+/**
+ * BYOK gate: skip all codebuff.com backend HTTP when an active BYOK profile
+ * is registered, unless `CODEBUFF_USE_BACKEND=1` is set as an escape hatch.
+ *
+ * Pre-existing SDK consumers without BYOK retain unchanged backend behavior.
+ */
+function shouldSkipBackend(): boolean {
+  if (process.env.CODEBUFF_USE_BACKEND === '1') return false
+  return getActiveByokProfile() !== null
+}
+
+const SYNTHETIC_USER = {
+  id: 'byok-local',
+  email: 'local@byok',
+  discord_id: null,
+  stripe_customer_id: null,
+  banned: false,
+  created_at: new Date(0),
+} as const
+
+function pickSyntheticUserFields<T extends UserColumn>(
+  fields: readonly T[],
+): { [K in T]: (typeof SYNTHETIC_USER)[K] } {
+  return Object.fromEntries(
+    fields.map((field) => [field, SYNTHETIC_USER[field]]),
+  ) as { [K in T]: (typeof SYNTHETIC_USER)[K] }
+}
 
 type CachedUserInfo = Partial<
   NonNullable<Awaited<GetUserInfoFromApiKeyOutput<UserColumn>>>
@@ -99,6 +128,12 @@ export async function getUserInfoFromApiKey<T extends UserColumn>(
   params: GetUserInfoFromApiKeyInput<T>,
 ): GetUserInfoFromApiKeyOutput<T> {
   const { apiKey, fields, logger } = params
+
+  if (shouldSkipBackend()) {
+    return pickSyntheticUserFields(fields) as Awaited<
+      GetUserInfoFromApiKeyOutput<T>
+    >
+  }
 
   const cached = userInfoCache[apiKey]
   if (cached === null) {
@@ -215,6 +250,14 @@ export async function getUserInfoFromApiKey<T extends UserColumn>(
 export async function fetchAgentFromDatabase(
   params: ParamsOf<FetchAgentFromDatabaseFn>,
 ): ReturnType<FetchAgentFromDatabaseFn> {
+  if (shouldSkipBackend()) {
+    // Returning null causes packages/agent-runtime/src/templates/agent-registry.ts
+    // getAgentTemplate() to fall through after exhausting localAgentTemplates +
+    // databaseAgentCache. Local .agents/mod-* templates must satisfy the lookup
+    // for BYOK agent runs to work.
+    return null
+  }
+
   const { apiKey, parsedAgentId, logger } = params
   const { publisherId, agentId, version } = parsedAgentId
 
@@ -302,6 +345,12 @@ export async function fetchAgentFromDatabase(
 export async function startAgentRun(
   params: ParamsOf<StartAgentRunFn>,
 ): ReturnType<StartAgentRunFn> {
+  if (shouldSkipBackend()) {
+    // No central run tracking in BYOK mode. Returning null is the existing
+    // "no run id available" sentinel; callers tolerate it.
+    return null
+  }
+
   const { apiKey, agentId, ancestorRunIds, logger } = params
 
   const url = new URL(`/api/v1/agent-runs`, WEBSITE_URL)
@@ -348,6 +397,8 @@ export async function startAgentRun(
 export async function finishAgentRun(
   params: ParamsOf<FinishAgentRunFn>,
 ): ReturnType<FinishAgentRunFn> {
+  if (shouldSkipBackend()) return
+
   const {
     apiKey,
     runId,
@@ -395,6 +446,8 @@ export async function finishAgentRun(
 export async function addAgentStep(
   params: ParamsOf<AddAgentStepFn>,
 ): ReturnType<AddAgentStepFn> {
+  if (shouldSkipBackend()) return null
+
   const {
     apiKey,
     agentRunId,

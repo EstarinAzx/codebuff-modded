@@ -9,6 +9,7 @@ import { getAuthToken } from '../utils/auth'
 import { IS_FREEBUFF } from '../utils/constants'
 import { getCliEnv } from '../utils/env'
 import { logger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 
 import type { Message } from '@codebuff/sdk'
 
@@ -17,6 +18,30 @@ const MAX_ADS_AFTER_ACTIVITY = 3 // Show up to 3 ads after last activity, then p
 const ACTIVITY_THRESHOLD_MS = 30_000 // 30 seconds idle threshold for fetching new ads
 const MAX_AD_CACHE_SIZE = 50 // Maximum number of ads to keep in cache
 const ZEROCLICK_IMPRESSIONS_URL = 'https://zeroclick.dev/api/v2/impressions'
+
+/**
+ * BYOK-at-boot flag. Computed once at module load to avoid Rules-of-Hooks
+ * mismatches if the user's BYOK status changes mid-session (e.g. via
+ * /providers:add). When true, the ad hook returns a stable no-op shape and
+ * never fires network requests against codebuff.com.
+ *
+ * Trade-off: a user who registers their first BYOK profile mid-session
+ * keeps seeing ads until they restart the CLI. Acceptable in v1.
+ */
+const BYOK_AT_BOOT: boolean = (() => {
+  try {
+    return getActiveProfile() !== null
+  } catch {
+    return false
+  }
+})()
+
+/** No-op state for BYOK mode. Stable identity so React reuses the same object. */
+const BYOK_AD_STATE: GravityAdState = {
+  ads: null,
+  isLoading: false,
+  recordImpression: () => {},
+}
 
 // Ad response type (normalized shape across providers; credits added after impression)
 export type AdResponse = {
@@ -98,6 +123,12 @@ export const useGravityAd = (options?: {
   /** Product surface requesting the ad. The server maps this to placements. */
   surface?: AdSurface
 }): GravityAdState => {
+  // BYOK mode: ads come from codebuff.com infra (Gravity / Carbon /
+  // ZeroClick proxied through web/src/app/api). Skip the whole pipeline
+  // when the user is on BYOK. Boot-time flag avoids Rules-of-Hooks
+  // mismatches if the user adds a profile mid-session.
+  if (BYOK_AT_BOOT) return BYOK_AD_STATE
+
   const enabled = options?.enabled ?? true
   const forceStart = options?.forceStart ?? false
   const provider: AdProvider = options?.provider ?? 'gravity'

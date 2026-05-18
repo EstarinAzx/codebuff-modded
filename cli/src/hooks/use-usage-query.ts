@@ -1,12 +1,22 @@
 import { env } from '@codebuff/common/env'
+import { SENTINEL_BACKEND_URL } from '@codebuff/common/env-schema'
 import { useCallback } from 'react'
 
 import { invalidateActivityQuery, useActivityQuery } from './use-activity-query'
 import { getAuthToken } from '../utils/auth'
 import { logger as defaultLogger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 
 import type { ClientEnv } from '@codebuff/common/types/contracts/env'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
+
+/** BYOK placeholder response — no central billing in BYOK mode. */
+const BYOK_USAGE_RESPONSE: UsageResponse = {
+  type: 'usage-response',
+  usage: 0,
+  remainingBalance: null,
+  next_quota_reset: null,
+}
 
 // Query keys for type-safe cache management
 export const usageQueryKeys = {
@@ -43,9 +53,17 @@ export async function fetchUsageData({
   logger = defaultLogger,
   clientEnv = env,
 }: FetchUsageParams): Promise<UsageResponse> {
+  // BYOK mode: no central billing. Synthesize a zero-usage response so the
+  // UsageBanner renders harmlessly without hitting the codebuff.com backend.
+  try {
+    if (getActiveProfile()) return BYOK_USAGE_RESPONSE
+  } catch {
+    /* ignore — fall through */
+  }
+
   const appUrl = clientEnv.NEXT_PUBLIC_CODEBUFF_APP_URL
-  if (!appUrl) {
-    throw new Error('NEXT_PUBLIC_CODEBUFF_APP_URL is not set')
+  if (!appUrl || appUrl === SENTINEL_BACKEND_URL) {
+    return BYOK_USAGE_RESPONSE
   }
 
   const response = await fetch(`${appUrl}/api/v1/usage`, {

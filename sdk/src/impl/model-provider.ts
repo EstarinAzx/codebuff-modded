@@ -25,6 +25,7 @@ import {
   isOpenAIProviderModel,
   toOpenAIModelId,
 } from '@codebuff/common/constants/chatgpt-oauth'
+import { SENTINEL_BACKEND_URL } from '@codebuff/common/env-schema'
 import {
   OpenAICompatibleChatLanguageModel,
   VERSION,
@@ -238,7 +239,22 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
     }
   }
 
-  // Default: use Codebuff backend
+  // Path B — Codebuff backend (legacy). Fail fast when neither a real backend
+  // URL is configured nor the explicit opt-in env flag is set, so BYOK users
+  // who forgot to register a profile see a clear error instead of confusing
+  // 401s against the sentinel URL.
+  if (
+    WEBSITE_URL === SENTINEL_BACKEND_URL &&
+    process.env.CODEBUFF_USE_BACKEND !== '1'
+  ) {
+    throw new Error(
+      'No active BYOK profile and no Codebuff backend configured. ' +
+        'Run /providers:add to register a provider profile, or set ' +
+        'NEXT_PUBLIC_CODEBUFF_APP_URL + CODEBUFF_USE_BACKEND=1 to use the ' +
+        'legacy Codebuff backend.',
+    )
+  }
+
   return {
     model: createCodebuffBackendModel(apiKey, model),
     isChatGptOAuth: false,

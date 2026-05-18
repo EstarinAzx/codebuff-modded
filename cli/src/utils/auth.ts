@@ -9,8 +9,22 @@ import { z } from 'zod'
 
 import { getApiClient, setApiClientAuthToken } from './codebuff-api'
 import { logger } from './logger'
+import { getActiveProfile } from './providers'
 
 import type { CiEnv } from '@codebuff/common/types/contracts/env'
+
+/**
+ * BYOK fork: when an active provider profile is registered, the CLI runs
+ * without needing real codebuff.com credentials. Auth checks return a
+ * synthetic local user so downstream code that gates on "is logged in?"
+ * doesn't bounce the user to /login.
+ */
+const SYNTHETIC_BYOK_USER: User = {
+  id: 'byok-local',
+  name: 'BYOK Local',
+  email: 'local@byok',
+  authToken: 'byok-local-token',
+}
 
 // User schema
 const userSchema = z.object({
@@ -82,24 +96,35 @@ const userFromJson = (
 export const getUserCredentials = (): User | null => {
   const credentialsPath = getCredentialsPath()
 
-  // Read user credentials directly from file
-  if (!fs.existsSync(credentialsPath)) {
-    return null
+  // Existing creds win (don't break users with a real codebuff.com session).
+  if (fs.existsSync(credentialsPath)) {
+    try {
+      const credentialsFile = fs.readFileSync(credentialsPath, 'utf8')
+      const user = userFromJson(credentialsFile)
+      if (user) return user
+    } catch (error) {
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Error reading credentials',
+      )
+    }
   }
 
+  // BYOK fallback: when no real creds exist but a provider profile is
+  // active, return a synthetic local user so auth-gated UI doesn't bounce
+  // the user to /login. Wrapped in try/catch so a corrupt providers.json
+  // never breaks the boot path.
   try {
-    const credentialsFile = fs.readFileSync(credentialsPath, 'utf8')
-    const user = userFromJson(credentialsFile)
-    return user || null
-  } catch (error) {
-    logger.error(
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-      'Error reading credentials',
-    )
-    return null
+    if (getActiveProfile()) {
+      return SYNTHETIC_BYOK_USER
+    }
+  } catch {
+    /* ignore — fall through */
   }
+
+  return null
 }
 
 export type AuthTokenSource = 'credentials' | 'environment' | null
