@@ -1,11 +1,11 @@
 {
-  "name": "codebuff",
-  "version": "1.0.677",
-  "description": "AI coding agent",
+  "name": "codebuff-mod",
+  "version": "0.0.1",
+  "description": "Personal modded fork of Codebuff CLI (launcher).",
   "license": "MIT",
   "bin": {
-    "codebuff": "index.js",
-    "cb": "index.js"
+    "codebuff-mod": "index.js",
+    "cbm": "index.js"
   },
   "scripts": {
     "postinstall": "node postinstall.js",
@@ -34,9 +34,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/CodebuffAI/codebuff.git"
+    "url": "git+https://github.com/EstarinAzx/codebuff.git"
   },
-  "homepage": "https://codebuff.com",
+  "homepage": "https://github.com/EstarinAzx/codebuff#readme",
   "publishConfig": {
     "access": "public"
   }

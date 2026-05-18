@@ -1,32 +1,42 @@
-# The most powerful coding agent
+# codebuff-mod
 
-Codebuff is a CLI tool that writes code for you.
+Personal modded fork of [Codebuff](https://github.com/CodebuffAI/codebuff). Launcher only — downloads the upstream Codebuff binary and hits the upstream backend. Fork-local backend changes (e.g. OpenCode Go provider lane) stay dormant unless paired with a self-hosted backend.
 
-1. Run `codebuff` from your project directory
-2. Tell it what to do
-3. It will read and write to files and run commands to produce the code you want
-
-Note: Codebuff will run commands in your terminal as it deems necessary to fulfill your request.
+Fork source: https://github.com/EstarinAzx/codebuff
 
 ## Installation
 
-To install Codebuff, run:
-
 ```bash
-npm install -g codebuff
+npm install -g codebuff-mod
 ```
 
 (Use `sudo` if you get a permission error.)
 
 ## Usage
 
-After installation, you can start Codebuff by running:
-
 ```bash
-codebuff [project-directory]
+codebuff-mod [project-directory]
 ```
 
-If no project directory is specified, Codebuff will use the current directory.
+or the short alias:
+
+```bash
+cbm [project-directory]
+```
+
+If no project directory is specified, the current directory is used.
+
+---
+
+## Upstream README (unmodified behavior)
+
+Codebuff is a CLI tool that writes code for you.
+
+1. Run it from your project directory
+2. Tell it what to do
+3. It will read and write to files and run commands to produce the code you want
+
+Note: Codebuff will run commands in your terminal as it deems necessary to fulfill your request.
 
 Once running, simply chat with Codebuff to say what coding task you want done.
 
