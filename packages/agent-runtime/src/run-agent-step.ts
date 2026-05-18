@@ -679,15 +679,17 @@ export async function loopAgentSteps(
     }
   }
 
-  const runId = await startAgentRun({
+  // BYOK mode: startAgentRun returns null (no central run tracking). Coerce to
+  // empty string so downstream string-typed call sites stay happy; skipped
+  // backend functions early-return on apiKey check anyway.
+  const runId = (await startAgentRun({
     ...params,
     agentId: agentTemplate.id,
     ancestorRunIds: initialAgentState.ancestorRunIds,
-  })
-  if (!runId) {
-    throw new Error('Failed to start agent run')
+  })) ?? ''
+  if (runId) {
+    initialAgentState.runId = runId
   }
-  initialAgentState.runId = runId
 
   let cachedAdditionalToolDefinitions: CustomToolDefinitions | undefined
   // Use parent's tools for prompt caching when inheritParentSystemPrompt is true

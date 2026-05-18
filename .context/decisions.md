@@ -32,3 +32,57 @@ Upstream architectural decisions live in upstream `docs/` and (if added later) `
 **Why:** Verified via grep that `ALLOWED_MODEL_PREFIXES` is only consumed by `common/src/types/dynamic-agent-template.ts` (Zod validator for agent template definitions), not by the chat-completions endpoint dispatch. Existing `opencode/` prefix (Zen) is also absent from the list and works fine — confirms the chat-completions path does not gate on it.
 
 **Revisit if:** an agent template references `opencode-go/*` as its model id (then the template validator will reject it and the prefix must be added).
+
+## 2026-05-18 — BYOK rip: Path C precedence via module-level singleton
+
+**Decision:** Implement BYOK as `activeByokProfile` module-level mutable state in `sdk/src/impl/model-provider.ts`, mirroring the existing `chatGptOAuthRateLimitedUntil` pattern in the same file. CLI calls `setActiveByokProfile()` at startup and on `/providers:select`. `getModelForRequest()` checks Path C first, then falls through to Path A (ChatGPT OAuth) and Path B (Codebuff backend).
+**Why:** SDK cannot import from CLI (inverted dep). Three alternatives considered: (a) move profile store to `common/` (bigger blast radius), (b) thread profile through every SDK call site as a param (deep plumbing through llm.ts → agent-runtime contract), (c) module singleton (smallest blast, matches existing pattern). Picked (c). Pre-existing SDK consumers without BYOK retain unchanged behavior because they never call the setter.
+**Reversibility:** easy (single-file revert restores Path A/B-only behavior)
+
+## 2026-05-18 — BYOK profile model wins over agent template model
+
+**Decision:** When a BYOK profile is active, Path C resolves the model id as `profile.model ?? params.model`. The profile's model wins regardless of what the agent template requested.
+**Why:** Agent templates hardcode model strings like `'anthropic/claude-sonnet-4.5'`. A user with an OpenAI BYOK profile would otherwise send that string to api.openai.com → 400. Single-profile single-model is a v1 limitation, documented. User changes via `/model <id>`. Per-agent model variation deferred to v2.
+**Reversibility:** easy
+
+## 2026-05-18 — Preserve Path B behind `CODEBUFF_USE_BACKEND=1`
+
+**Decision:** Phase 5 did NOT delete the Codebuff backend code paths. Both `database.ts` (getUserInfoFromApiKey, fetchAgentFromDatabase, startAgentRun, etc.) and `model-provider.ts` Path B remain wired. The skip is gated on `getActiveByokProfile() !== null && CODEBUFF_USE_BACKEND !== '1'`.
+**Why:** SDK is consumed by external users (per `sdk/`'s public API). Hard-deleting Path B is breaking. Env opt-in lets BYOK be the default while preserving SDK API for anyone who still relies on the backend.
+**Reversibility:** easy. If BYOK CLI is the only consumer that ever ships from this fork, hard-delete is fine — change one line in `shouldSkipBackend()`.
+
+## 2026-05-18 — Local `.agents/mod-*` standalone, not wrapping `createBase2`
+
+**Decision:** Phase 4 mod-default/lite/max/plan templates are simple standalone `AgentDefinition` objects with inline tool lists, NOT wrappers around upstream `agents/base2/base2.ts` `createBase2()`.
+**Why:** `createBase2` pulls in heavy freebuff/codebuff constants (`@codebuff/common/constants/freebuff-*`), spawns sub-agents (file-picker, code-searcher, editor-multi-prompt) that themselves have hardcoded codebuff.com model ids, and includes systemPrompt strings that reference codebuff.com docs. Wrapping it would defeat the BYOK goal. Standalone templates are simpler and more honest.
+**Trade-off:** No specialized sub-agents. mod-max compensates with stronger instructions + broader tool surface. Per-agent specialization deferred to v2.
+
+## 2026-05-18 — Launcher fetches binary from GitHub Releases, not bundled in npm package
+
+**Decision:** Keep the `codebuff-mod` npm package launcher-only (~9 KB). On first run it downloads the platform binary from `github.com/EstarinAzx/codebuff/releases/download/v{version}/codebuff-mod-{platform}-{arch}.tar.gz` and caches at `~/.config/manicode/codebuff-mod[.exe]`. Mirrors the upstream launcher pattern; only `packageName` + download URL changed.
+**Why:** Bundling 3+ platform binaries inside the npm tarball would balloon the package to ~150MB+ and hit npm's default 100MB limit. Optional-deps split (esbuild/swc pattern) is significant work. Launcher pattern reuses existing infra and keeps `npm install -g codebuff-mod` fast.
+**Reversibility:** medium. To switch to bundled-binary later, edit `cli/release/index.js` to use local file path instead of HTTP fetch, and publish per-platform npm packages.
+
+## 2026-05-18 — Bundle `.agents/mod-*.ts` into CLI binary at prebuild time
+
+**Decision:** `cli/scripts/prebuild-agents.ts` scans both upstream `agents/` and fork-local `.agents/mod-*.ts`, merging the latter into the same `bundled-agents.generated.ts` manifest. mod-default/lite/max/plan ship inside the binary; the runtime `.agents/` scan in `cli/src/utils/local-agent-registry.ts` is now reserved for user-side overrides.
+
+**Why:** End users run `cbm` from arbitrary cwds that do not contain `.agents/`. Without bundling, `mod-default` resolution falls through to the upstream codebuff.com agent template DB (unreachable in BYOK mode) and the CLI errors out with `Invalid agent ID: "mod-default"`. Considered (a) requiring users to keep a `.agents/` in their project root — rejected as bad UX, (b) shipping `.agents/` alongside the binary in a known cache dir — rejected because it doubles the install surface and conflicts with the user's own `.agents/`. Bundling is the smallest change that makes the fork's defaults work everywhere.
+
+**Trade-off:** Adding a new fork-local mod-* template now requires re-running the prebuild step before `build:binary`. Captured in [[gotchas]].
+
+**Reversibility:** easy (revert the `.agents/` scan block in prebuild-agents.ts).
+
+## 2026-05-18 — `startAgentRun` null result is non-fatal in BYOK
+
+**Decision:** `packages/agent-runtime/src/run-agent-step.ts` coerces a null return from `startAgentRun()` to empty string and skips the `Failed to start agent run` throw. Downstream call sites already guarded on `agentState.runId` truthiness, so the throw was redundant — and lethal in BYOK mode, where `sdk/src/impl/database.ts:348` deliberately returns null to skip central run tracking.
+
+**Why:** `database.ts:349` advertised "callers tolerate it" as a comment but the caller did not. Two ways to fix: (a) widen `runId` to `string | null` across the entire agent-runtime contract — high blast radius, many type changes, and the downstream code already tolerates empty/missing values; (b) coerce at the entry point so the existing string-typed contract holds. Picked (b).
+
+**Reversibility:** easy (one-line revert restores hard-throw behavior; only needed if we ever require a non-null runId in agent-runtime, e.g. to write run records locally instead of skipping).
+
+## 2026-05-18 — Module-level `BYOK_AT_BOOT` flag in React hooks
+
+**Decision:** Hooks that need to skip codebuff.com polling (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) compute a module-level `BYOK_AT_BOOT` boolean at module load time, not per-render.
+**Why:** React's Rules of Hooks — early-returning conditionally inside a hook based on changing state breaks the hook-count invariant. If a user adds their first profile mid-session, the per-render check would flip from false to true and cause "rendered fewer hooks than expected" errors. Module-level flag is consistent for the lifetime of the process.
+**Trade-off:** A user who adds their first BYOK profile mid-session continues to see ads / "connecting…" until they restart the CLI. Acceptable in v1.

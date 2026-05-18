@@ -17,6 +17,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 
 const AGENTS_DIR = path.join(import.meta.dir, '../../agents')
+const DOT_AGENTS_DIR = path.join(import.meta.dir, '../../.agents')
 const OUTPUT_FILE = path.join(import.meta.dir, '../src/agents/bundled-agents.generated.ts')
 
 interface AgentDefinition {
@@ -151,6 +152,27 @@ async function main() {
   }
 
   const tsFiles = getAllTsFiles(AGENTS_DIR)
+
+  // BYOK fork: also bundle .agents/mod-*.ts so `cbm` works outside the
+  // codebuff repo. Upstream .agents/ is user/project-local at runtime, but
+  // mod-default/lite/max/plan replace upstream base2 (which lives in the
+  // codebuff.com agent template DB, unreachable in BYOK mode) and must be
+  // present in the binary itself.
+  if (fs.existsSync(DOT_AGENTS_DIR)) {
+    const dotAgentEntries = fs.readdirSync(DOT_AGENTS_DIR, { withFileTypes: true })
+    for (const entry of dotAgentEntries) {
+      if (
+        entry.isFile() &&
+        entry.name.startsWith('mod-') &&
+        entry.name.endsWith('.ts') &&
+        !entry.name.endsWith('.d.ts') &&
+        !entry.name.endsWith('.test.ts')
+      ) {
+        tsFiles.push(path.join(DOT_AGENTS_DIR, entry.name))
+      }
+    }
+  }
+
   if (DEBUG) {
     console.log(`📁 DEBUG: Found ${tsFiles.length} TypeScript files`)
   }

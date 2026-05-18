@@ -32,3 +32,25 @@ One env var serves both. If you later need separate keys per endpoint, add `OPEN
 ## Windows + bun workspaces
 
 Workspace install + typecheck both run from repo root (`bun install`, `bun run typecheck`). Do not run them per-package — the `--filter='*'` script depends on workspace resolution from root.
+
+## bun `--compile` chokes on spaced project paths
+
+Cross-compiling Linux x64 / arm64 binaries from Windows fails with `Failed to extract executable for 'bun-linux-{arch}-vX.Y.Z'. The download may be incomplete.` when the project path contains spaces (e.g. `D:\.claude\claude projects\codebuff`). Bun's internal extract path inherits the spaced path and trips Windows' extraction logic. Workaround: create a junction to a spaceless path (`New-Item -ItemType Junction -Path C:\cb -Target "D:\.claude\claude projects\codebuff"`), then run `bun run build:binary` from PowerShell with `cd C:\cb\cli`. Native Win x64 builds work fine from the spaced path.
+
+## bun's bundled tar on Windows can't extract OpenTUI native bundles
+
+`ensureOpenTuiNativeBundle()` in `cli/scripts/build-binary.ts` invokes `tar -xzf ... --force-local`. Windows ships bsdtar at `C:\Windows\System32\tar.exe` which rejects `--force-local` (GNU-only flag). Symptom: build fails extracting `@opentui/core-linux-arm64-X.Y.Z.tgz`. Workaround: pre-install the bundle via `bun add --no-save @opentui/core-linux-{arch}@<version>` (matches `optionalDependencies` in `node_modules/@opentui/core/package.json`), which lets bun handle the extract internally. Or run the build from MSYS bash where `tar` resolves to GNU tar at `/usr/bin/tar`.
+
+## `prebuild-agents.ts` bundles `agents/` plus `.agents/mod-*.ts`
+
+The script at `cli/scripts/prebuild-agents.ts` walks the upstream `agents/` directory **and** picks up fork-local `.agents/mod-*.ts` (filtered by `mod-` prefix) so the BYOK templates ship inside the CLI binary. End users running `cbm` from any cwd resolve mod-default/lite/max/plan against the bundle, not the filesystem. The runtime `.agents/` scan in `cli/src/utils/local-agent-registry.ts` still loads user-side overrides from the cwd and can replace bundled agents with the same id.
+
+Adding a new fork-local agent: if the id starts with `mod-`, drop the file in `.agents/` and re-run `bun run scripts/prebuild-agents.ts` before `build:binary`. Other `.agents/` files (claude-code-cli.ts, codex-cli.ts, notion-*) are deliberately excluded from the bundle — they're user-side overrides, not first-party fork templates.
+
+## Adding a profile mid-session leaves stale BYOK gates in place
+
+Several CLI hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) compute a `BYOK_AT_BOOT` module-level flag once at process start. A user who registers their first BYOK profile via `/providers:add` mid-session will continue to see ads / "connecting…" / silent validation failures until they restart the CLI. The agent-runtime side (SDK Path C dispatch) DOES re-check the singleton per request and works without restart — only the React-side gates are pinned at boot.
+
+## `.context/active-work.md` rolling state — past sessions are gone
+
+The handoff file is rewritten from scratch each `/context-update`. The git log + the in-tree plan doc at `.claude/byok-rip-implementation-plan.md` are the only persistent record of how we got from upstream codebuff to standalone BYOK. Don't put session history in active-work.md; it belongs in commits.
