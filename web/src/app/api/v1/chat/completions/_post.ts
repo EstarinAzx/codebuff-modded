@@ -74,6 +74,12 @@ import {
   isOpenCodeZenModel,
 } from '@/llm-api/opencode-zen'
 import {
+  OpenCodeGoError,
+  handleOpenCodeGoNonStream,
+  handleOpenCodeGoStream,
+  isOpenCodeGoModel,
+} from '@/llm-api/opencode-go'
+import {
   SiliconFlowError,
   handleSiliconFlowNonStream,
   handleSiliconFlowStream,
@@ -703,23 +709,34 @@ export async function postChatCompletions(params: {
         // Streaming request — route supported models to direct providers.
         const useSiliconFlow = false // isSiliconFlowModel(typedBody.model)
         const useOpenCodeZen = isOpenCodeZenModel(typedBody.model)
-        const useMoonshot = !useOpenCodeZen && isMoonshotModel(typedBody.model)
+        const useOpenCodeGo =
+          !useOpenCodeZen && isOpenCodeGoModel(typedBody.model)
+        const useMoonshot =
+          !useOpenCodeZen &&
+          !useOpenCodeGo &&
+          isMoonshotModel(typedBody.model)
         const useCanopyWave =
-          !useMoonshot && !useOpenCodeZen && isCanopyWaveModel(typedBody.model)
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useOpenCodeGo &&
+          isCanopyWaveModel(typedBody.model)
         const useDeepSeek =
           !useMoonshot &&
           !useOpenCodeZen &&
+          !useOpenCodeGo &&
           !useCanopyWave &&
           isDeepSeekModel(typedBody.model)
         const useFireworks =
           !useMoonshot &&
           !useOpenCodeZen &&
+          !useOpenCodeGo &&
           !useCanopyWave &&
           !useDeepSeek &&
           isFireworksModel(typedBody.model)
         const useOpenAIDirect =
           !useMoonshot &&
           !useOpenCodeZen &&
+          !useOpenCodeGo &&
           !useCanopyWave &&
           !useDeepSeek &&
           !useFireworks &&
@@ -739,18 +756,20 @@ export async function postChatCompletions(params: {
             ? await handleMoonshotStream(baseArgs)
             : useOpenCodeZen
               ? await handleOpenCodeZenStream(baseArgs)
-              : useCanopyWave
-                ? await handleCanopyWaveStream(baseArgs)
-                : useDeepSeek
-                  ? await handleDeepSeekStream(baseArgs)
-                  : useFireworks
-                    ? await handleFireworksStream(baseArgs)
-                    : useOpenAIDirect
-                      ? await handleOpenAIStream(baseArgs)
-                      : await handleOpenRouterStream({
-                          ...baseArgs,
-                          openrouterApiKey,
-                        })
+              : useOpenCodeGo
+                ? await handleOpenCodeGoStream(baseArgs)
+                : useCanopyWave
+                  ? await handleCanopyWaveStream(baseArgs)
+                  : useDeepSeek
+                    ? await handleDeepSeekStream(baseArgs)
+                    : useFireworks
+                      ? await handleFireworksStream(baseArgs)
+                      : useOpenAIDirect
+                        ? await handleOpenAIStream(baseArgs)
+                        : await handleOpenRouterStream({
+                            ...baseArgs,
+                            openrouterApiKey,
+                          })
 
         trackSuccessEvent({
           event: AnalyticsEvent.CHAT_COMPLETIONS_STREAM_STARTED,
@@ -775,23 +794,31 @@ export async function postChatCompletions(params: {
         const model = typedBody.model
         const useSiliconFlow = false // isSiliconFlowModel(model)
         const useOpenCodeZen = isOpenCodeZenModel(model)
-        const useMoonshot = !useOpenCodeZen && isMoonshotModel(model)
+        const useOpenCodeGo = !useOpenCodeZen && isOpenCodeGoModel(model)
+        const useMoonshot =
+          !useOpenCodeZen && !useOpenCodeGo && isMoonshotModel(model)
         const useCanopyWave =
-          !useMoonshot && !useOpenCodeZen && isCanopyWaveModel(model)
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useOpenCodeGo &&
+          isCanopyWaveModel(model)
         const useDeepSeek =
           !useMoonshot &&
           !useOpenCodeZen &&
+          !useOpenCodeGo &&
           !useCanopyWave &&
           isDeepSeekModel(model)
         const useFireworks =
           !useMoonshot &&
           !useOpenCodeZen &&
+          !useOpenCodeGo &&
           !useCanopyWave &&
           !useDeepSeek &&
           isFireworksModel(model)
         const shouldUseOpenAIEndpoint =
           !useMoonshot &&
           !useOpenCodeZen &&
+          !useOpenCodeGo &&
           !useCanopyWave &&
           !useDeepSeek &&
           !useFireworks &&
@@ -812,18 +839,20 @@ export async function postChatCompletions(params: {
             ? handleMoonshotNonStream(baseArgs)
             : useOpenCodeZen
               ? handleOpenCodeZenNonStream(baseArgs)
-              : useCanopyWave
-                ? handleCanopyWaveNonStream(baseArgs)
-                : useDeepSeek
-                  ? handleDeepSeekNonStream(baseArgs)
-                  : useFireworks
-                    ? handleFireworksNonStream(baseArgs)
-                    : shouldUseOpenAIEndpoint
-                      ? handleOpenAINonStream(baseArgs)
-                      : handleOpenRouterNonStream({
-                          ...baseArgs,
-                          openrouterApiKey,
-                        })
+              : useOpenCodeGo
+                ? handleOpenCodeGoNonStream(baseArgs)
+                : useCanopyWave
+                  ? handleCanopyWaveNonStream(baseArgs)
+                  : useDeepSeek
+                    ? handleDeepSeekNonStream(baseArgs)
+                    : useFireworks
+                      ? handleFireworksNonStream(baseArgs)
+                      : shouldUseOpenAIEndpoint
+                        ? handleOpenAINonStream(baseArgs)
+                        : handleOpenRouterNonStream({
+                            ...baseArgs,
+                            openrouterApiKey,
+                          })
         const result = await nonStreamRequest
 
         trackSuccessEvent({
@@ -872,6 +901,10 @@ export async function postChatCompletions(params: {
       if (error instanceof OpenCodeZenError) {
         opencodeZenError = error
       }
+      let opencodeGoError: OpenCodeGoError | undefined
+      if (error instanceof OpenCodeGoError) {
+        opencodeGoError = error
+      }
 
       // Log detailed error information for debugging
       const errorDetails = openrouterError?.toJSON()
@@ -880,17 +913,19 @@ export async function postChatCompletions(params: {
         ? 'SiliconFlow'
         : opencodeZenError
           ? 'OpenCode Zen'
-          : moonshotError
-            ? 'Moonshot'
-            : canopywaveError
-              ? 'CanopyWave'
-              : deepseekError
-                ? 'DeepSeek'
-                : fireworksError
-                  ? 'Fireworks'
-                  : openaiError
-                    ? 'OpenAI'
-                    : 'OpenRouter'
+          : opencodeGoError
+            ? 'OpenCode Go'
+            : moonshotError
+              ? 'Moonshot'
+              : canopywaveError
+                ? 'CanopyWave'
+                : deepseekError
+                  ? 'DeepSeek'
+                  : fireworksError
+                    ? 'Fireworks'
+                    : openaiError
+                      ? 'OpenAI'
+                      : 'OpenRouter'
       logger.error(
         {
           error: getErrorObject(error),
@@ -913,7 +948,8 @@ export async function postChatCompletions(params: {
             deepseekError ??
             siliconflowError ??
             openaiError ??
-            opencodeZenError
+            opencodeZenError ??
+            opencodeGoError
           )?.statusCode,
           providerStatusText: (
             openrouterError ??
@@ -923,7 +959,8 @@ export async function postChatCompletions(params: {
             deepseekError ??
             siliconflowError ??
             openaiError ??
-            opencodeZenError
+            opencodeZenError ??
+            opencodeGoError
           )?.statusText,
           openrouterErrorCode: errorDetails?.error?.code,
           openrouterErrorType: errorDetails?.error?.type,
@@ -968,6 +1005,9 @@ export async function postChatCompletions(params: {
         return NextResponse.json(error.toJSON(), { status: error.statusCode })
       }
       if (error instanceof OpenCodeZenError) {
+        return NextResponse.json(error.toJSON(), { status: error.statusCode })
+      }
+      if (error instanceof OpenCodeGoError) {
         return NextResponse.json(error.toJSON(), { status: error.statusCode })
       }
 

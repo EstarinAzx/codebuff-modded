@@ -60,6 +60,12 @@ export const openCodeZenModels = {
 export type OpenCodeZenModel =
   (typeof openCodeZenModels)[keyof typeof openCodeZenModels]
 
+export const openCodeGoModels = {
+  opencode_go_glm_5: 'opencode-go/glm-5',
+} as const
+export type OpenCodeGoModel =
+  (typeof openCodeGoModels)[keyof typeof openCodeGoModels]
+
 export const deepseekModels = {
   deepseekChat: 'deepseek-chat',
   deepseekReasoner: 'deepseek-reasoner',
