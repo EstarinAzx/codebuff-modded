@@ -1,6 +1,6 @@
 # codebuff-mod
 
-Personal modded fork of [Codebuff](https://github.com/CodebuffAI/codebuff). Launcher only — downloads the upstream Codebuff binary and hits the upstream backend. Fork-local backend changes (e.g. OpenCode Go provider lane) stay dormant unless paired with a self-hosted backend.
+BYOK fork of [Codebuff](https://github.com/CodebuffAI/codebuff). Bring your own LLM provider API key — no codebuff.com account, no central billing, no quotas beyond what your provider enforces.
 
 Fork source: https://github.com/EstarinAzx/codebuff
 
@@ -12,106 +12,102 @@ npm install -g codebuff-mod
 
 (Use `sudo` if you get a permission error.)
 
-## Usage
+## Quick start
 
 ```bash
-codebuff-mod [project-directory]
+cd ~/my-project
+cbm           # or: codebuff-mod
 ```
 
-or the short alias:
+Inside the CLI:
 
-```bash
-cbm [project-directory]
+```
+/providers:add <preset> <profile-name> <apiKey>
 ```
 
-If no project directory is specified, the current directory is used.
+Presets:
 
----
+| Preset | Default model | Notes |
+|---|---|---|
+| `openai` | gpt-5.1 | api.openai.com |
+| `anthropic` | claude-sonnet-4.5 | api.anthropic.com |
+| `openrouter` | anthropic/claude-sonnet-4.5 | openrouter.ai |
+| `opencode` | minimax-m2.7 | opencode.ai/zen/v1 |
+| `opencode-go` | glm-5 | opencode.ai/zen/go/v1 |
+| `deepseek` | deepseek-chat | api.deepseek.com |
+| `gemini` | gemini-2.5-pro | generativelanguage.googleapis.com |
+| `mistral` | mistral-large-latest | api.mistral.ai |
+| `together` | meta-llama/Llama-3.3-70B-Instruct-Turbo | api.together.xyz |
+| `groq` | llama-3.3-70b-versatile | api.groq.com |
+| `custom-openai` | (yours) | Any OpenAI-compatible endpoint — needs `<baseUrl>` arg |
 
-## Upstream README (unmodified behavior)
+Then run any coding task. Agent picks model from your active profile, sends requests directly to your provider, no codebuff.com involvement.
 
-Codebuff is a CLI tool that writes code for you.
+## Commands
 
-1. Run it from your project directory
-2. Tell it what to do
-3. It will read and write to files and run commands to produce the code you want
+| Command | What it does |
+|---|---|
+| `/providers` | List your profiles (`*` marks active) |
+| `/providers:add <preset> <name> <apiKey>` | Add a new profile, set active |
+| `/providers:select <id\|name>` | Switch active profile |
+| `/providers:remove <id\|name>` | Remove a profile |
+| `/providers:test` | Send a 1-token ping to verify the active profile works |
+| `/providers:refresh-models` | Bust the 24h `/v1/models` cache for the active profile |
+| `/model` | Show current model + live-probe available ids |
+| `/model <id>` | Swap model on the active profile |
+| `/mode:default` `/mode:lite` `/mode:max` `/mode:plan` | Switch agent mode (mod-* templates in `.agents/`) |
 
-Note: Codebuff will run commands in your terminal as it deems necessary to fulfill your request.
+Your profiles live at `~/.config/manicode/providers.json` (chmod 0600). API keys are masked in all log output.
 
-Once running, simply chat with Codebuff to say what coding task you want done.
+## Knowledge files
 
-## Features
-
-- Understands your whole codebase
-- Creates and edits multiple files based on your request
-- Can run your tests or type checker or linter; can install packages
-- It's powerful: ask Codebuff to keep working until it reaches a condition and it will.
-
-Our users regularly use Codebuff to implement new features, write unit tests, refactor code,write scripts, or give advice.
-
-## Knowledge Files
-
-To unlock the full benefits of modern LLMs, we recommend storing knowledge alongside your code. Add a `knowledge.md` file anywhere in your project to provide helpful context, guidance, and tips for the LLM as it performs tasks for you.
-
-Codebuff can fluently read and write files, so it will add knowledge as it goes. You don't need to write knowledge manually!
-
-Some have said every change should be paired with a unit test. In 2024, every change should come with a knowledge update!
-
-## Tips
-
-1. Type '/help' or just '/' to see available commands.
-2. Create a `knowledge.md` file and collect specific points of advice. The assistant will use this knowledge to improve its responses.
-3. Type `undo` or `redo` to revert or reapply file changes from the conversation.
-4. Press `Esc` or `Ctrl+C` while Codebuff is generating a response to stop it.
+Add a `knowledge.md` anywhere in your project to give the agent persistent context. The agent reads + writes them as it works.
 
 ## Troubleshooting
 
-### Permission Errors
+### Permission errors during install
 
-If you are getting permission errors during installation, try using sudo:
-
-```
-sudo npm install -g codebuff
-```
-
-If you still have errors, it's a good idea to [reinstall Node](https://nodejs.org/en/download).
-
-### Corporate Proxy / Firewall
-
-If you see `Failed to download codebuff: Request timeout` or `Failed to determine latest version`, you may be behind a corporate proxy or firewall.
-
-Codebuff respects standard proxy environment variables. Set `HTTPS_PROXY` to route traffic through your proxy:
-
-**Linux / macOS (bash/zsh):**
 ```bash
-export HTTPS_PROXY=http://your-proxy-server:port
-codebuff
+sudo npm install -g codebuff-mod
 ```
 
-**Windows (PowerShell):**
-```powershell
-$env:HTTPS_PROXY = "http://your-proxy-server:port"
-codebuff
+If still broken, [reinstall Node](https://nodejs.org/en/download).
+
+### Binary download fails
+
+The launcher fetches the platform binary from GitHub Releases of `EstarinAzx/codebuff` on first run. If you're behind a proxy, set `HTTPS_PROXY`:
+
+```bash
+export HTTPS_PROXY=http://your-proxy-server:port   # bash/zsh
+$env:HTTPS_PROXY = "http://your-proxy-server:port" # PowerShell
+set HTTPS_PROXY=http://your-proxy-server:port      # CMD
 ```
 
-**Windows (CMD):**
-```cmd
-set HTTPS_PROXY=http://your-proxy-server:port
-codebuff
+Also supported: `HTTP_PROXY`, `NO_PROXY` (with comma-separated hostnames). URL-embedded credentials work (`http://user:pw@proxy:port`).
+
+### "No active BYOK profile and no Codebuff backend configured"
+
+You haven't added a provider profile yet. Run `/providers:add` (see above).
+
+### Override binary download URL (testing)
+
+```bash
+export CODEBUFF_MOD_RELEASE_URL=https://example.com/codebuff-mod-linux-x64.tar.gz
 ```
 
-To make it permanent, add the `export` or `set` line to your shell profile (e.g. `~/.bashrc`, `~/.zshrc`, or Windows System Environment Variables).
+### Use the legacy Codebuff backend instead (advanced)
 
-**Supported environment variables:**
+```bash
+export CODEBUFF_USE_BACKEND=1
+export NEXT_PUBLIC_CODEBUFF_APP_URL=https://codebuff.com
+```
 
-| Variable | Purpose |
-|---|---|
-| `HTTPS_PROXY` / `https_proxy` | Proxy for HTTPS requests (recommended) |
-| `HTTP_PROXY` / `http_proxy` | Fallback proxy for HTTP requests |
-| `NO_PROXY` / `no_proxy` | Comma-separated list of hostnames to bypass the proxy (port suffixes are ignored) |
+This restores the upstream behavior (requires a real codebuff.com account + API key).
 
-Both `http://` and `https://` proxy URLs are supported. Proxy authentication is supported via URL credentials (e.g. `http://user:password@proxy:port`).
+## License
 
-## Feedback
+MIT. Built on top of [Codebuff](https://github.com/CodebuffAI/codebuff) (Apache-2.0).
 
-We value your input! Please email your feedback to `founders@codebuff.com`. Thank you for using Codebuff!
+## Issues
+
+https://github.com/EstarinAzx/codebuff/issues

@@ -1,7 +1,7 @@
 {
   "name": "codebuff-mod",
-  "version": "0.0.1",
-  "description": "Personal modded fork of Codebuff CLI (launcher).",
+  "version": "0.1.0",
+  "description": "BYOK fork of the Codebuff CLI. Bring your own provider key (OpenAI, Anthropic, OpenRouter, OpenCode Zen/Go, custom OpenAI-compat). No codebuff.com account required.",
   "license": "MIT",
   "bin": {
     "codebuff-mod": "index.js",
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "postinstall": "node postinstall.js",
-    "preuninstall": "node -e \"const fs = require('fs'); const path = require('path'); const os = require('os'); const binaryPath = path.join(os.homedir(), '.config', 'manicode', process.platform === 'win32' ? 'codebuff.exe' : 'codebuff'); try { fs.unlinkSync(binaryPath) } catch (e) { /* ignore if file doesn't exist */ }\""
+    "preuninstall": "node -e \"const fs = require('fs'); const path = require('path'); const os = require('os'); const binaryPath = path.join(os.homedir(), '.config', 'manicode', process.platform === 'win32' ? 'codebuff-mod.exe' : 'codebuff-mod'); try { fs.unlinkSync(binaryPath) } catch (e) { /* ignore if file doesn't exist */ }\""
   },
   "files": [
     "index.js",

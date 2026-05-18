@@ -11,7 +11,13 @@ const zlib = require('zlib')
 const tar = require('tar')
 const { createReleaseHttpClient } = require('./http')
 
-const packageName = 'codebuff'
+const packageName = 'codebuff-mod'
+
+// BYOK fork: binary artifacts ship via GitHub Releases of EstarinAzx/codebuff
+// instead of upstream codebuff.com /api/releases/download. End users only
+// need `npm install -g codebuff-mod` — launcher fetches the right platform
+// binary on first run.
+const RELEASE_REPO = 'EstarinAzx/codebuff'
 
 /**
  * Terminal escape sequences to reset terminal state after the child process exits.
@@ -289,9 +295,11 @@ async function downloadBinary(version) {
     throw error
   }
 
-  const downloadUrl = `${
-    process.env.NEXT_PUBLIC_CODEBUFF_APP_URL || 'https://codebuff.com'
-  }/api/releases/download/${version}/${fileName}`
+  // Fork: download from GitHub Releases of EstarinAzx/codebuff. CODEBUFF_MOD_RELEASE_URL
+  // overrides for testing (point at a local file:// or different repo).
+  const downloadUrl =
+    process.env.CODEBUFF_MOD_RELEASE_URL ||
+    `https://github.com/${RELEASE_REPO}/releases/download/v${version}/${fileName}`
 
   // Ensure config directory exists
   fs.mkdirSync(CONFIG.configDir, { recursive: true })
@@ -442,7 +450,7 @@ async function ensureBinaryExists() {
     await downloadBinary(version)
   } catch (error) {
     term.clearLine()
-    console.error('❌ Failed to download codebuff:', error.message)
+    console.error(`❌ Failed to download ${packageName}:`, error.message)
     console.error('Please check your internet connection and try again')
     if (!getProxyUrl()) {
       console.error(
@@ -502,7 +510,7 @@ async function checkForUpdates(runningProcess, exitListener) {
       })
 
       newChild.on('error', (err) => {
-        console.error('Failed to start codebuff:', err.message)
+        console.error(`Failed to start ${packageName}:`, err.message)
         process.exit(1)
       })
 
@@ -557,7 +565,7 @@ function printCrashDiagnostics(code, signal) {
   console.error(`  Binary:   ${CONFIG.binaryPath}`)
   console.error('')
   console.error('Please report this issue at:')
-  console.error('  https://github.com/CodebuffAI/codebuff/issues')
+  console.error(`  https://github.com/${RELEASE_REPO}/issues`)
   console.error('')
 }
 
@@ -577,7 +585,7 @@ async function main() {
   child.on('exit', exitListener)
 
   child.on('error', (err) => {
-    console.error('Failed to start codebuff:', err.message)
+    console.error(`Failed to start ${packageName}:`, err.message)
     process.exit(1)
   })
 
