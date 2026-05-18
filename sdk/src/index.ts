@@ -97,4 +97,7 @@ export {
 } from './impl/llm'
 export {
   resetChatGptOAuthRateLimit,
+  setActiveByokProfile,
+  getActiveByokProfile,
 } from './impl/model-provider'
+export type { BYOKProfile } from './impl/model-provider'

@@ -2,6 +2,7 @@ import { CHATGPT_OAUTH_ENABLED } from '@codebuff/common/constants/chatgpt-oauth'
 import {
   getChatGptOAuthCredentials,
   getValidChatGptOAuthCredentials,
+  setActiveByokProfile,
 } from '@codebuff/sdk'
 import { enableMapSet } from 'immer'
 
@@ -11,6 +12,7 @@ import { initTimestampFormatter } from '../utils/helpers'
 import { enableManualThemeRefresh } from '../utils/theme-system'
 import { initAnalytics } from '../utils/analytics'
 import { getFingerprintId } from '../utils/fingerprint'
+import { getActiveProfile } from '../utils/providers'
 import { initializeDirenv } from './init-direnv'
 
 export async function initializeApp(params: { cwd?: string }): Promise<void> {
@@ -48,5 +50,21 @@ export async function initializeApp(params: { cwd?: string }): Promise<void> {
         // Best-effort background refresh.
       })
     }
+  }
+
+  // BYOK (Path C): if the user has an active provider profile, register it
+  // with the SDK so getModelForRequest routes through Path C instead of the
+  // Codebuff backend. Re-called by /providers:select in Phase 3.
+  try {
+    const profile = getActiveProfile()
+    if (profile) {
+      setActiveByokProfile({
+        provider: profile.provider,
+        baseUrl: profile.baseUrl,
+        apiKey: profile.apiKey,
+      })
+    }
+  } catch (error) {
+    console.debug('Failed to apply BYOK profile at startup:', error)
   }
 }

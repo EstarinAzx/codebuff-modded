@@ -1,13 +1,21 @@
 /**
  * Model provider abstraction for routing requests to the appropriate LLM provider.
  *
- * This module handles:
- * - ChatGPT OAuth: Direct requests to OpenAI API using user's OAuth token
- * - Default: Requests through Codebuff backend (which routes to OpenRouter)
+ * Dispatch order:
+ * - Path C (BYOK): when an active BYOK profile is set via `setActiveByokProfile()`,
+ *   route the request directly to the profile's provider HTTP endpoint with the
+ *   user's own API key. No codebuff.com involvement.
+ * - Path A (ChatGPT OAuth): direct OpenAI/Codex requests using the user's OAuth token.
+ * - Path B (Codebuff backend): requests through codebuff.com (routes to OpenRouter).
+ *
+ * Path C takes precedence — once a profile is registered, it owns the dispatch.
+ * SDK consumers that never call `setActiveByokProfile()` retain pre-existing
+ * behavior (Path A / Path B).
  */
 
 import path from 'path'
 
+import { createAnthropic } from '@ai-sdk/anthropic'
 import { BYOK_OPENROUTER_HEADER } from '@codebuff/common/constants/byok'
 import { isFreeMode } from '@codebuff/common/constants/free-agents'
 import {
@@ -33,6 +41,53 @@ import {
 } from './chatgpt-backend-fetch'
 
 import type { LanguageModel } from 'ai'
+
+// ============================================================================
+// BYOK Profile (Path C)
+// ============================================================================
+
+/**
+ * Minimal shape the SDK needs from a BYOK profile to route a request directly.
+ * The CLI's full `ProviderProfile` (with id / createdAt / preset metadata) is a
+ * structural superset; pass it straight to `setActiveByokProfile`.
+ */
+export type BYOKProfile = {
+  /** Wire protocol — picks the provider client. */
+  provider: 'openai' | 'anthropic'
+  /** Provider base URL (no trailing slash). */
+  baseUrl: string
+  /** API key for Authorization: Bearer. */
+  apiKey: string
+}
+
+let activeByokProfile: BYOKProfile | null = null
+
+/**
+ * Register (or clear) the BYOK profile the SDK should route through.
+ * Pass `null` to revert to Path A / Path B behavior.
+ *
+ * Called by the CLI at startup with the active profile from
+ * `~/.config/manicode/providers.json`, and again on `/providers:select`.
+ */
+export function setActiveByokProfile(profile: BYOKProfile | null): void {
+  if (profile === null) {
+    activeByokProfile = null
+    return
+  }
+  const baseUrl = (profile.baseUrl ?? '').replace(/\/+$/, '')
+  if (
+    (profile.provider !== 'openai' && profile.provider !== 'anthropic') ||
+    !baseUrl ||
+    typeof profile.apiKey !== 'string'
+  ) {
+    throw new Error('setActiveByokProfile: invalid profile shape')
+  }
+  activeByokProfile = { provider: profile.provider, baseUrl, apiKey: profile.apiKey }
+}
+
+export function getActiveByokProfile(): BYOKProfile | null {
+  return activeByokProfile
+}
 
 // ============================================================================
 // ChatGPT OAuth Rate Limit Cache
@@ -117,6 +172,15 @@ type OpenRouterUsageAccounting = {
 export async function getModelForRequest(params: ModelRequestParams): Promise<ModelResult> {
   const { apiKey, model, skipChatGptOAuth, costMode } = params
 
+  // Path C — BYOK profile (highest precedence when registered).
+  // No-op for SDK consumers that never call setActiveByokProfile().
+  if (activeByokProfile) {
+    return {
+      model: createDirectProviderModel({ profile: activeByokProfile, model }),
+      isChatGptOAuth: false,
+    }
+  }
+
   // Check if we should use ChatGPT OAuth direct
   // Only attempt for allowlisted models; non-allowlisted models silently fall through to backend.
   if (
@@ -157,6 +221,44 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
     model: createCodebuffBackendModel(apiKey, model),
     isChatGptOAuth: false,
   }
+}
+
+/**
+ * Path C factory — route a request directly to a user-supplied provider
+ * (OpenAI-compat or Anthropic) using their own API key. No codebuff.com.
+ *
+ * The `model` argument is the resolved model id from the caller (agent
+ * template / runtime). Profile-level `model` field is the CLI's fallback
+ * default and is applied higher up; the SDK sees the already-resolved id.
+ */
+function createDirectProviderModel(params: {
+  profile: BYOKProfile
+  model: string
+}): LanguageModel {
+  const { profile, model } = params
+  const baseUrl = profile.baseUrl.replace(/\/+$/, '')
+
+  if (profile.provider === 'anthropic') {
+    const anthropic = createAnthropic({
+      baseURL: baseUrl,
+      apiKey: profile.apiKey,
+    })
+    return anthropic(model)
+  }
+
+  // openai-compat branch: openai, opencode, opencode-go, openrouter,
+  // mistral, together, groq, deepseek, gemini, custom-openai
+  return new OpenAICompatibleChatLanguageModel(model, {
+    provider: 'byok',
+    url: ({ path: endpoint }) => `${baseUrl}${endpoint}`,
+    headers: () => ({
+      Authorization: `Bearer ${profile.apiKey}`,
+      'user-agent': `ai-sdk/openai-compatible/${VERSION}/codebuff-byok`,
+    }),
+    fetch: undefined,
+    supportsStructuredOutputs: true,
+    includeUsage: undefined,
+  })
 }
 
 /**
