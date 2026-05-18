@@ -2,7 +2,7 @@
 type: stack
 project: codebuff (fork — modded branch)
 updated: 2026-05-18
-tags: [stack, tooling]
+tags: [stack, tooling, byok]
 ---
 
 # Stack
@@ -71,11 +71,11 @@ Upstream surface (mostly dead in BYOK mode):
 
 BYOK fork additions (`modded` branch):
 
-- Profile store — `cli/src/utils/providers.ts` (CRUD against `~/.config/manicode/providers.json`, 0600)
+- Profile store — `cli/src/utils/providers.ts` (CRUD against `~/.config/manicode/providers.json`, schema v2, 0600). Holds profiles **and** `agentBindings: Record<agentId, profileId>` for per-agent routing.
 - Model catalog/probe — `cli/src/utils/providers-models.ts` (hardcoded ids + live `/v1/models` probe with 24h cache at `~/.config/manicode/models-cache.json`)
-- Slash commands — `cli/src/commands/providers.ts` (`/providers*` + `/model`) registered in `cli/src/commands/command-registry.ts`
-- SDK Path C — `sdk/src/impl/model-provider.ts` (`BYOKProfile`, `setActiveByokProfile`, `createDirectProviderModel`)
+- Slash commands — `cli/src/commands/providers.ts` (`/providers*` + `/model`) registered in `cli/src/commands/command-registry.ts`. Includes `/providers:bind`, `/providers:unbind`, `/providers:bindings` as of 0.1.5.
+- SDK Path C — `sdk/src/impl/model-provider.ts` (`BYOKProfile`, `setActiveByokProfile`, `setByokAgentBindings`, `createDirectProviderModel`). Per-request resolution: `byokAgentBindings[params.agentId] ?? activeByokProfile`.
 - Backend skip gate — `sdk/src/impl/database.ts` `shouldSkipBackend()`
-- BYOK agent templates — `.agents/mod-default.ts`, `mod-lite.ts`, `mod-max.ts`, `mod-plan.ts`
+- BYOK agent templates — `.agents/mod-default.ts`, `mod-lite.ts`, `mod-max.ts`, `mod-plan.ts`. mod-default + mod-max spawn upstream sub-agents (file-picker, code-searcher, thinker, code-reviewer) as of 0.1.5.
 - Launcher (npm) — `cli/release/index.js` (`packageName: 'codebuff-mod'`, fetches binary from `github.com/EstarinAzx/codebuff/releases`)
 - Rip plan — `.claude/byok-rip-implementation-plan.md`

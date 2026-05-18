@@ -1,9 +1,10 @@
 /**
  * BYOK mod-max — thorough coding agent for complex tasks.
  *
- * Single-model BYOK profile means no sub-agent specialization (all agents
- * use the same model). mod-max compensates with deeper context-gathering
- * and explicit validation steps in the instructions, not via spawn_agents.
+ * With per-agent BYOK bindings, mod-max can route cheap sub-agents
+ * (file-picker, code-searcher, thinker) to a faster/cheaper profile and
+ * keep the orchestrator on a stronger model. Wire bindings with
+ * `/providers:bind <agentId> <profileRef>`.
  *
  * See .agents/mod-default.ts for the BYOK model-resolution semantics.
  */
@@ -16,7 +17,7 @@ const definition: AgentDefinition = {
   model: 'anthropic/claude-opus-4.7',
 
   spawnerPrompt:
-    'Thorough coding agent for hard problems — reads broadly, plans, edits with care, validates aggressively.',
+    'Thorough coding agent for hard problems — reads broadly, plans, edits with care, validates aggressively, spawns specialized sub-agents.',
 
   inputSchema: {
     prompt: {
@@ -43,11 +44,14 @@ const definition: AgentDefinition = {
     'run_terminal_command',
     'write_todos',
     'think_deeply',
+    'spawn_agents',
     'ask_user',
     'suggest_followups',
     'set_output',
     'end_turn',
   ],
+
+  spawnableAgents: ['file-picker', 'code-searcher', 'thinker', 'code-reviewer'],
 
   systemPrompt: `You are a thorough coding assistant in a BYOK CLI, tuned for complex multi-step work where correctness matters more than speed.
 

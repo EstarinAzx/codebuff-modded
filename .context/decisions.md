@@ -9,6 +9,28 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-18 — Per-agent BYOK profile bindings (0.1.5)
+
+**Decision:** Allow agent-id → profile bindings in `providers.json` (schema v2). SDK Path C resolves `byokAgentBindings[params.agentId] ?? activeByokProfile` so a spawned sub-agent (file-picker, code-searcher, …) can route through a different provider/model than the orchestrating top-level agent. CLI surfaces this via `/providers:bind`, `/providers:unbind`, `/providers:bindings`.
+
+**Why:** v1 BYOK forced one profile-model for *every* agent in a run, so file-picker hit the user's expensive default model instead of a cheap Flash/DeepSeek lane. Three approaches considered: (a) env-flag flip to respect the agent template's hardcoded model (worked only when the user's provider also serves that exact id; OpenRouter-only really); (b) deeper per-agent overlay through Path C with full multi-profile semantics; (c) deferred to v2. Picked (b) because user already wanted multiple `/providers:add` profiles working in concert — schema bump was the minimum honest fix.
+
+**Trade-off accepted:** schema migration on the shared providers.json. v1 readers (older 0.1.x) ignore the new `agentBindings` field silently — safe one-way. Mid-session bind/unbind is live on the SDK side (per-request lookup), but React-side `BYOK_AT_BOOT` gating is unchanged: ads/connecting hooks still pin at module load.
+
+**Reversibility:** easy. SDK change is additive (one new branch + module state). CLI commands + storage are fork-only files. Schema bump is forward-compatible. PORT marker left in `sdk/src/impl/model-provider.ts` near `byokAgentBindings` for upstream merge if upstream introduces a similar mechanism.
+
+## 2026-05-18 — Restore mod-default/max sub-agent spawning (0.1.5)
+
+**Decision:** mod-default + mod-max now declare `spawn_agents` in `toolNames` and a curated `spawnableAgents` list (`file-picker`, `code-searcher`, `thinker`; mod-max also gets `code-reviewer`). mod-lite + mod-plan stay sub-agent-free.
+
+**Why:** the upstream specialized sub-agents are already bundled by `cli/scripts/prebuild-agents.ts` (it walks all of `agents/`), so the only thing blocking BYOK users from using them was the deliberately-empty `spawnableAgents` on mod-*. Phase 4 left them off because a single shared profile-model defeated the point — Gemini-Flash file-picker would silently run on Sonnet. With per-agent bindings (above) restored, the specialization is meaningful again.
+
+**Trade-off accepted:** spawned sub-agents still respect Path C — if no binding exists they use the active profile, same as the orchestrator. Users wanting cost savings *must* register a cheap profile and `/providers:bind <agent>` it; out of the box mod-default + Sonnet hits Sonnet for the file-picker too. Documented in the new `spawnerPrompt` strings.
+
+**Reversibility:** easy — revert two `.agents/mod-*.ts` files + re-run prebuild.
+
+## 2026-05-18 — OpenCode Go: clone, don't extend
+
 ## 2026-05-18 — OpenCode Go: clone, don't extend
 
 **Decision:** Create `web/src/llm-api/opencode-go.ts` as a full sibling of `opencode-zen.ts` rather than parameterizing the Zen handler to handle both endpoints.

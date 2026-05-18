@@ -51,12 +51,18 @@ export type ProviderPresetDefaults = {
 }
 
 type ProvidersFile = {
-  version: 1
+  version: 2
   activeProfileId: string | null
   profiles: ProviderProfile[]
+  /**
+   * agentId → profileId map. When an agent runs and its id has a binding,
+   * SDK Path C dispatches through that profile instead of the active one.
+   * Bindings referencing missing profiles are pruned at read time.
+   */
+  agentBindings: Record<string, string>
 }
 
-const PROVIDERS_FILE_VERSION = 1 as const
+const PROVIDERS_FILE_VERSION = 2 as const
 
 // ── path resolution ──────────────────────────────────────────────────────
 // Avoid importing cli/utils/auth.ts here — that pulls in the codebuff-api
@@ -241,7 +247,28 @@ function newProfileId(): string {
 // ── file I/O ─────────────────────────────────────────────────────────────
 
 function defaultFile(): ProvidersFile {
-  return { version: PROVIDERS_FILE_VERSION, activeProfileId: null, profiles: [] }
+  return {
+    version: PROVIDERS_FILE_VERSION,
+    activeProfileId: null,
+    profiles: [],
+    agentBindings: {},
+  }
+}
+
+function sanitizeBindings(
+  raw: unknown,
+  profiles: ProviderProfile[],
+): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, string> = {}
+  const profileIds = new Set(profiles.map((p) => p.id))
+  for (const [agentId, profileId] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof agentId !== 'string' || !agentId.trim()) continue
+    if (typeof profileId !== 'string' || !profileId.trim()) continue
+    if (!profileIds.has(profileId)) continue
+    out[agentId.trim()] = profileId.trim()
+  }
+  return out
 }
 
 function readFile(filePath: string): ProvidersFile {
@@ -268,10 +295,12 @@ function readFile(filePath: string): ProvidersFile {
   const activeId = trim(p.activeProfileId as string | undefined) || null
   const validActive =
     activeId && profiles.some((pr) => pr.id === activeId) ? activeId : null
+  const agentBindings = sanitizeBindings(p.agentBindings, profiles)
   return {
     version: PROVIDERS_FILE_VERSION,
     activeProfileId: validActive,
     profiles,
+    agentBindings,
   }
 }
 
@@ -319,10 +348,12 @@ export function saveProfiles(
     current.activeProfileId && profiles.some((p) => p.id === current.activeProfileId)
       ? current.activeProfileId
       : null
+  const agentBindings = sanitizeBindings(current.agentBindings, profiles)
   atomicWrite(filePath, {
     version: PROVIDERS_FILE_VERSION,
     activeProfileId: activeId,
     profiles,
+    agentBindings,
   })
 }
 
@@ -430,12 +461,95 @@ export function removeProfile(
   if (profiles.length === file.profiles.length) return false
   const activeId =
     file.activeProfileId === id ? (profiles[0]?.id ?? null) : file.activeProfileId
+  const agentBindings = sanitizeBindings(file.agentBindings, profiles)
   atomicWrite(filePath, {
     version: PROVIDERS_FILE_VERSION,
     profiles,
     activeProfileId: activeId,
+    agentBindings,
   })
   return true
+}
+
+// ── agent → profile bindings ─────────────────────────────────────────────
+
+export function loadAgentBindings(
+  filePath: string = getProvidersFilePath(),
+): Record<string, string> {
+  return readFile(filePath).agentBindings
+}
+
+export function getAgentBinding(
+  agentId: string,
+  filePath: string = getProvidersFilePath(),
+): ProviderProfile | null {
+  const file = readFile(filePath)
+  const profileId = file.agentBindings[agentId]
+  if (!profileId) return null
+  return file.profiles.find((p) => p.id === profileId) ?? null
+}
+
+export function setAgentBinding(
+  agentId: string,
+  profileId: string,
+  filePath: string = getProvidersFilePath(),
+): ProviderProfile | null {
+  const trimmedAgent = agentId.trim()
+  if (!trimmedAgent) return null
+  const file = readFile(filePath)
+  const profile = file.profiles.find((p) => p.id === profileId)
+  if (!profile) return null
+  const agentBindings = { ...file.agentBindings, [trimmedAgent]: profile.id }
+  atomicWrite(filePath, { ...file, agentBindings })
+  return profile
+}
+
+export function clearAgentBinding(
+  agentId: string,
+  filePath: string = getProvidersFilePath(),
+): boolean {
+  const trimmedAgent = agentId.trim()
+  if (!trimmedAgent) return false
+  const file = readFile(filePath)
+  if (!(trimmedAgent in file.agentBindings)) return false
+  const { [trimmedAgent]: _removed, ...rest } = file.agentBindings
+  atomicWrite(filePath, { ...file, agentBindings: rest })
+  return true
+}
+
+/**
+ * Build the binding map the SDK expects:
+ * `{ [agentId]: { provider, baseUrl, apiKey, model } }`. Skips entries whose
+ * profile has been deleted (the sanitizer already prunes these on read, but
+ * we re-check here to be defensive against races).
+ */
+export function buildSdkBindings(
+  filePath: string = getProvidersFilePath(),
+): Record<string, {
+  provider: ProviderProtocol
+  baseUrl: string
+  apiKey: string
+  model?: string
+}> {
+  const file = readFile(filePath)
+  const profilesById = new Map(file.profiles.map((p) => [p.id, p]))
+  const out: Record<string, {
+    provider: ProviderProtocol
+    baseUrl: string
+    apiKey: string
+    model?: string
+  }> = {}
+  for (const [agentId, profileId] of Object.entries(file.agentBindings)) {
+    const profile = profilesById.get(profileId)
+    if (!profile) continue
+    out[agentId] = {
+      provider: profile.provider,
+      baseUrl: profile.baseUrl,
+      apiKey: profile.apiKey,
+      model: profile.model || undefined,
+    }
+  }
+  return out
 }
 
 // ── safe display helpers ─────────────────────────────────────────────────

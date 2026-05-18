@@ -72,6 +72,35 @@ export type BYOKProfile = {
 let activeByokProfile: BYOKProfile | null = null
 
 /**
+ * Per-agent BYOK profile overrides. Maps agentId → profile. When a spawned
+ * agent has a binding, Path C dispatches through that profile instead of the
+ * active profile. CLI pushes the full map via `setByokAgentBindings()` on
+ * startup and after every `/providers:bind` / `/providers:unbind`.
+ *
+ * PORT: if upstream introduces a similar mechanism, this is the merge point.
+ */
+let byokAgentBindings: Record<string, BYOKProfile> = {}
+
+function normalizeProfile(profile: BYOKProfile, label: string): BYOKProfile {
+  const baseUrl = (profile.baseUrl ?? '').replace(/\/+$/, '')
+  if (
+    (profile.provider !== 'openai' && profile.provider !== 'anthropic') ||
+    !baseUrl ||
+    typeof profile.apiKey !== 'string'
+  ) {
+    throw new Error(`${label}: invalid profile shape`)
+  }
+  return {
+    provider: profile.provider,
+    baseUrl,
+    apiKey: profile.apiKey,
+    model: typeof profile.model === 'string' && profile.model.length > 0
+      ? profile.model
+      : undefined,
+  }
+}
+
+/**
  * Register (or clear) the BYOK profile the SDK should route through.
  * Pass `null` to revert to Path A / Path B behavior.
  *
@@ -83,26 +112,39 @@ export function setActiveByokProfile(profile: BYOKProfile | null): void {
     activeByokProfile = null
     return
   }
-  const baseUrl = (profile.baseUrl ?? '').replace(/\/+$/, '')
-  if (
-    (profile.provider !== 'openai' && profile.provider !== 'anthropic') ||
-    !baseUrl ||
-    typeof profile.apiKey !== 'string'
-  ) {
-    throw new Error('setActiveByokProfile: invalid profile shape')
-  }
-  activeByokProfile = {
-    provider: profile.provider,
-    baseUrl,
-    apiKey: profile.apiKey,
-    model: typeof profile.model === 'string' && profile.model.length > 0
-      ? profile.model
-      : undefined,
-  }
+  activeByokProfile = normalizeProfile(profile, 'setActiveByokProfile')
 }
 
 export function getActiveByokProfile(): BYOKProfile | null {
   return activeByokProfile
+}
+
+/**
+ * Replace the full agent → profile binding map. Pass `{}` to clear all
+ * bindings. Invalid entries are skipped with a `console.warn`; the rest of
+ * the map is still applied so one bad row does not break the whole feature.
+ */
+export function setByokAgentBindings(
+  bindings: Record<string, BYOKProfile> | null,
+): void {
+  if (!bindings) {
+    byokAgentBindings = {}
+    return
+  }
+  const next: Record<string, BYOKProfile> = {}
+  for (const [agentId, profile] of Object.entries(bindings)) {
+    if (!agentId || !profile) continue
+    try {
+      next[agentId] = normalizeProfile(profile, `setByokAgentBindings[${agentId}]`)
+    } catch (err) {
+      console.warn(`Skipping invalid BYOK binding for "${agentId}":`, err)
+    }
+  }
+  byokAgentBindings = next
+}
+
+export function getByokAgentBindings(): Record<string, BYOKProfile> {
+  return byokAgentBindings
 }
 
 // ============================================================================
@@ -157,6 +199,12 @@ export interface ModelRequestParams {
   skipChatGptOAuth?: boolean
   /** Cost mode (e.g. 'free') — affects fallback behavior for OAuth routes */
   costMode?: string
+  /**
+   * Optional agent id (e.g. 'file-picker', 'mod-default'). When set and a
+   * BYOK binding exists for it, Path C uses the bound profile instead of the
+   * active profile. Ignored by Path A / Path B.
+   */
+  agentId?: string
 }
 
 /**
@@ -186,18 +234,23 @@ type OpenRouterUsageAccounting = {
  * This function is async because it may need to refresh the OAuth token.
  */
 export async function getModelForRequest(params: ModelRequestParams): Promise<ModelResult> {
-  const { apiKey, model, skipChatGptOAuth, costMode } = params
+  const { apiKey, model, skipChatGptOAuth, costMode, agentId } = params
 
   // Path C — BYOK profile (highest precedence when registered).
   // No-op for SDK consumers that never call setActiveByokProfile().
-  if (activeByokProfile) {
+  // Per-agent binding (if any) overrides the active profile so a single
+  // CLI session can hit different providers/models for different sub-agents.
+  const boundProfile =
+    agentId && byokAgentBindings[agentId] ? byokAgentBindings[agentId] : null
+  const profileForRequest = boundProfile ?? activeByokProfile
+  if (profileForRequest) {
     // Profile-pinned model wins so a single BYOK profile is internally consistent
     // (agent templates would otherwise request models the user's provider can't
     // serve). User swaps with /model; see cli/src/commands/providers.ts.
-    const resolvedModel = activeByokProfile.model ?? model
+    const resolvedModel = profileForRequest.model ?? model
     return {
       model: createDirectProviderModel({
-        profile: activeByokProfile,
+        profile: profileForRequest,
         model: resolvedModel,
       }),
       isChatGptOAuth: false,

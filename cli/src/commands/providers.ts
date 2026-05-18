@@ -6,18 +6,22 @@
  * the source of truth for the command logic.
  */
 
-import { setActiveByokProfile } from '@codebuff/sdk'
+import { setActiveByokProfile, setByokAgentBindings } from '@codebuff/sdk'
 
 import {
   addProfile,
+  buildSdkBindings,
+  clearAgentBinding,
   describeProfileForLog,
   getActiveProfile,
   getPresetDefaults,
   listPresets,
+  loadAgentBindings,
   loadProfiles,
   maskApiKey,
   removeProfile,
   setActiveProfile,
+  setAgentBinding,
   updateProfile,
   type ProviderPreset,
   type ProviderProfile,
@@ -42,6 +46,10 @@ function syncSdkActiveProfile(profile: ProviderProfile | null): void {
     apiKey: profile.apiKey,
     model: profile.model,
   })
+}
+
+function syncSdkAgentBindings(): void {
+  setByokAgentBindings(buildSdkBindings())
 }
 
 function fmtProfileLine(profile: ProviderProfile, active: boolean): string {
@@ -197,8 +205,9 @@ export function handleProvidersRemove(args: string): string {
   }
   const wasActive = getActiveProfile()?.id === target.id
   removeProfile(target.id)
-  // Resync SDK with whatever is active now
+  // Resync SDK with whatever is active now + prune dropped bindings
   syncSdkActiveProfile(getActiveProfile())
+  syncSdkAgentBindings()
   const tail = wasActive
     ? ` Active profile cleared${getActiveProfile() ? ` (now: ${getActiveProfile()!.name})` : ''}.`
     : ''
@@ -305,6 +314,74 @@ export async function handleModelCommand(args: string): Promise<string> {
   // SDK singleton — otherwise the next request still uses the old model.
   syncSdkActiveProfile(updated)
   return `Active model set to "${target}" for profile "${updated.name}".`
+}
+
+// ── agent → profile bindings ─────────────────────────────────────────────
+
+export function handleProvidersBind(args: string): string {
+  const parts = args.trim().split(/\s+/).filter((p) => p.length > 0)
+  if (parts.length < 2) {
+    return [
+      'Usage: /providers:bind <agentId> <profileIdOrName>',
+      '',
+      'Routes spawned <agentId> through the named profile instead of the active one.',
+      'Examples:',
+      '  /providers:bind file-picker fastcheap',
+      '  /providers:bind code-searcher prof_a1b2',
+    ].join('\n')
+  }
+  const agentId = parts[0]
+  const profileRef = parts.slice(1).join(' ')
+  const profiles = loadProfiles()
+  if (profiles.length === 0) {
+    return 'No profiles configured. Add one with /providers:add first.'
+  }
+  const target = parseProfileRef(profileRef, profiles)
+  if (!target) {
+    return `No unique profile matches "${profileRef}". Use /providers to list.`
+  }
+  const bound = setAgentBinding(agentId, target.id)
+  if (!bound) {
+    return `Failed to bind agent "${agentId}" to "${target.name}".`
+  }
+  syncSdkAgentBindings()
+  return `Bound agent "${agentId}" → "${bound.name}" (${bound.id}, model=${bound.model || '<unset>'}).`
+}
+
+export function handleProvidersUnbind(args: string): string {
+  const agentId = args.trim()
+  if (!agentId) {
+    return 'Usage: /providers:unbind <agentId>'
+  }
+  const removed = clearAgentBinding(agentId)
+  if (!removed) {
+    return `No binding for "${agentId}".`
+  }
+  syncSdkAgentBindings()
+  return `Unbound "${agentId}". Will fall back to the active profile.`
+}
+
+export function handleProvidersBindings(): string {
+  const bindings = loadAgentBindings()
+  const entries = Object.entries(bindings)
+  if (entries.length === 0) {
+    return [
+      'No agent bindings configured.',
+      '',
+      'Bind an agent to a profile with:',
+      '  /providers:bind <agentId> <profileIdOrName>',
+    ].join('\n')
+  }
+  const profiles = loadProfiles()
+  const byId = new Map(profiles.map((p) => [p.id, p]))
+  const lines = entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([agentId, profileId]) => {
+      const p = byId.get(profileId)
+      if (!p) return `  ${agentId} → <missing profile ${profileId}>`
+      return `  ${agentId} → ${p.name} (${p.preset}, model=${p.model || '<unset>'})`
+    })
+  return ['Agent → profile bindings:', ...lines].join('\n')
 }
 
 export function handleLoginBYOKHint(): string {

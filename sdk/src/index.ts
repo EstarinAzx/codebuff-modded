@@ -99,5 +99,7 @@ export {
   resetChatGptOAuthRateLimit,
   setActiveByokProfile,
   getActiveByokProfile,
+  setByokAgentBindings,
+  getByokAgentBindings,
 } from './impl/model-provider'
 export type { BYOKProfile } from './impl/model-provider'

@@ -10,11 +10,14 @@ import {
   handleLoginBYOKHint,
   handleModelCommand,
   handleProvidersAdd,
+  handleProvidersBind,
+  handleProvidersBindings,
   handleProvidersList,
   handleProvidersRefreshModels,
   handleProvidersRemove,
   handleProvidersSelect,
   handleProvidersTest,
+  handleProvidersUnbind,
 } from './providers'
 import { runBashCommand } from './router'
 import { handleUsageCommand } from './usage'
@@ -189,6 +192,9 @@ const FREEBUFF_REMOVED_COMMANDS = new Set([
   'providers:remove',
   'providers:test',
   'providers:refresh-models',
+  'providers:bind',
+  'providers:unbind',
+  'providers:bindings',
   'model',
 ])
 
@@ -701,6 +707,42 @@ const ALL_COMMANDS: CommandDefinition[] = [
         ...prev,
         getUserMessage(params.inputValue.trim()),
         getSystemMessage(handleProvidersRefreshModels()),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommandWithArgs({
+    name: 'providers:bind',
+    handler: (params, args) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersBind(args)),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommandWithArgs({
+    name: 'providers:unbind',
+    handler: (params, args) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersUnbind(args)),
+      ])
+      params.saveToHistory(params.inputValue.trim())
+      clearInput(params)
+    },
+  }),
+  defineCommand({
+    name: 'providers:bindings',
+    handler: (params) => {
+      params.setMessages((prev) => [
+        ...prev,
+        getUserMessage(params.inputValue.trim()),
+        getSystemMessage(handleProvidersBindings()),
       ])
       params.saveToHistory(params.inputValue.trim())
       clearInput(params)

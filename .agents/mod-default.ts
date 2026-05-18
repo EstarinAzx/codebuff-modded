@@ -6,9 +6,11 @@
  * cli/utils/constants.ts AGENT_MODE_TO_ID map.
  *
  * The `model` field below is a fallback for non-BYOK runs (Path B). When a
- * BYOK profile is active, sdk Path C resolves to `profile.model` regardless
- * of what this template says — agent templates and profiles each pick the
- * model independently, profile wins. Swap with `/model <id>`.
+ * BYOK profile is active, sdk Path C resolves to `profile.model` UNLESS a
+ * per-agent binding overrides it (`/providers:bind <agentId> <profileRef>`).
+ * Sub-agents (file-picker / code-searcher / ...) honor their own bindings
+ * independently, so users can route cheap sub-agents to a Flash/DeepSeek
+ * profile and keep the orchestrator on a stronger model.
  */
 
 import type { AgentDefinition } from './types/agent-definition'
@@ -19,7 +21,7 @@ const definition: AgentDefinition = {
   model: 'anthropic/claude-sonnet-4.5',
 
   spawnerPrompt:
-    'Default coding agent for the BYOK fork. Reads, edits, runs terminal commands, and validates work without spawning sub-agents.',
+    'Default coding agent for the BYOK fork. Reads, edits, runs terminal commands, validates work, and spawns specialized sub-agents (file-picker, code-searcher) for breadth.',
 
   inputSchema: {
     prompt: {
@@ -41,11 +43,14 @@ const definition: AgentDefinition = {
     'write_file',
     'run_terminal_command',
     'write_todos',
+    'spawn_agents',
     'ask_user',
     'suggest_followups',
     'set_output',
     'end_turn',
   ],
+
+  spawnableAgents: ['file-picker', 'code-searcher', 'thinker'],
 
   systemPrompt: `You are the default coding assistant for a CLI tool. The user has supplied their own LLM provider credentials (BYOK), so you are running on a single model the user picked — no cost gating, no rate limits beyond what their provider enforces.
 

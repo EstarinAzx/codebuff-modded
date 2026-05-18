@@ -3,6 +3,7 @@ import {
   getChatGptOAuthCredentials,
   getValidChatGptOAuthCredentials,
   setActiveByokProfile,
+  setByokAgentBindings,
 } from '@codebuff/sdk'
 import { enableMapSet } from 'immer'
 
@@ -12,7 +13,7 @@ import { initTimestampFormatter } from '../utils/helpers'
 import { enableManualThemeRefresh } from '../utils/theme-system'
 import { initAnalytics } from '../utils/analytics'
 import { getFingerprintId } from '../utils/fingerprint'
-import { getActiveProfile } from '../utils/providers'
+import { buildSdkBindings, getActiveProfile } from '../utils/providers'
 import { initializeDirenv } from './init-direnv'
 
 export async function initializeApp(params: { cwd?: string }): Promise<void> {
@@ -67,5 +68,14 @@ export async function initializeApp(params: { cwd?: string }): Promise<void> {
     }
   } catch (error) {
     console.debug('Failed to apply BYOK profile at startup:', error)
+  }
+
+  // BYOK per-agent bindings: push the agentId → profile map so spawned
+  // sub-agents dispatch through their bound profile instead of the active one.
+  // Re-pushed by /providers:bind, /providers:unbind, /providers:remove.
+  try {
+    setByokAgentBindings(buildSdkBindings())
+  } catch (error) {
+    console.debug('Failed to apply BYOK agent bindings at startup:', error)
   }
 }

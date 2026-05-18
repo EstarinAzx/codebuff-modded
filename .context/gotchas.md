@@ -51,6 +51,12 @@ Adding a new fork-local agent: if the id starts with `mod-`, drop the file in `.
 
 Several CLI hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) compute a `BYOK_AT_BOOT` module-level flag once at process start. A user who registers their first BYOK profile via `/providers:add` mid-session will continue to see ads / "connecting…" / silent validation failures until they restart the CLI. The agent-runtime side (SDK Path C dispatch) DOES re-check the singleton per request and works without restart — only the React-side gates are pinned at boot.
 
+## Per-agent BYOK bindings are pushed at boot, but live on the SDK side
+
+`setByokAgentBindings()` is called from `cli/src/init/init-app.ts` at startup and re-called by every `/providers:bind` / `/providers:unbind` / `/providers:remove` handler. The SDK reads the map per request, so binding changes take effect on the next agent spawn without restart.
+
+But the *React-side* `BYOK_AT_BOOT` gates in `use-connection-status`, `use-gravity-ad`, `use-agent-validation` are still pinned at module load (see the existing gotcha below about mid-session profiles). Adding bindings mid-session does not flip those gates — only adding the *first* profile does. Same restart caveat applies if you go from zero profiles to bindings in one session.
+
 ## `.context/active-work.md` rolling state — past sessions are gone
 
 The handoff file is rewritten from scratch each `/context-update`. The git log + the in-tree plan doc at `.claude/byok-rip-implementation-plan.md` are the only persistent record of how we got from upstream codebuff to standalone BYOK. Don't put session history in active-work.md; it belongs in commits.
