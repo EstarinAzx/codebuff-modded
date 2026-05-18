@@ -51,8 +51,8 @@ interface LogoResult {
  * Returns a fully formatted React component and text block that "just work"
  *
  * Returns:
- * - Full ASCII logo for width >= 70
- * - Small ASCII logo for width >= 40
+ * - Full ASCII logo for width >= 92
+ * - Small ASCII logo for width >= 20
  * - Text variant "CODEBUFF" or "Codebuff CLI" for narrow widths
  *
  * The hook handles ALL formatting internally including:
@@ -76,7 +76,7 @@ export const useLogo = ({
     if (maxHeight != null && maxHeight < ASCII_LOGO_LINES) {
       return IS_FREEBUFF ? 'FREEBUFF' : 'CODEBUFF'
     }
-    if (availableWidth >= 70) return LOGO
+    if (availableWidth >= 92) return LOGO
     if (availableWidth >= 20) return LOGO_SMALL
     return IS_FREEBUFF ? 'FREEBUFF' : 'CODEBUFF'
   }, [availableWidth, maxHeight])

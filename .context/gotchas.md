@@ -1,7 +1,7 @@
 ---
 type: gotchas
 project: codebuff (fork — modded branch)
-updated: 2026-05-18
+updated: 2026-05-19
 tags: [gotchas]
 ---
 
@@ -60,6 +60,12 @@ Several CLI hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validat
 `setByokAgentBindings()` is called from `cli/src/init/init-app.ts` at startup and re-called by every `/providers:bind` / `/providers:unbind` / `/providers:remove` handler. The SDK reads the map per request, so binding changes take effect on the next agent spawn without restart.
 
 But the *React-side* `BYOK_AT_BOOT` gates in `use-connection-status`, `use-gravity-ad`, `use-agent-validation` are still pinned at module load (see the existing gotcha below about mid-session profiles). Adding bindings mid-session does not flip those gates — only adding the *first* profile does. Same restart caveat applies if you go from zero profiles to bindings in one session.
+
+## Zero BYOK profiles = lockout pre-0.1.7 (fixed in 0.1.7)
+
+Before 0.1.7, a user with **no provider profile** AND no codebuff.com `credentials.json` was hard-locked out of the CLI. The startup gate (`index.tsx`) and `validateApiKey` (`use-auth-query.ts`) only had BYOK escape hatches that gated on `getActiveProfile()` truthy — so with zero profiles the CLI fell back to the dead codebuff.com `LoginModal`, whose `POST /api/auth/cli/code` hits `http://127.0.0.1:1` (unset backend) and fails. `LoginModal` renders before the chat input, so there was no in-app way to reach `/providers:add`. Triggered by: fresh `npm i -g codebuff-mod`, `/logout`, or `/providers:remove`-ing the last profile.
+
+0.1.7 fixed it (see [[decisions]]): the gate is skipped whenever `CODEBUFF_USE_BACKEND !== '1'`. If you ever need to manually unlock an older binary, hand-write `~/.config/manicode/providers.json` with one structurally-valid profile (`sanitizeProfile` requires only `id`, `name`, `preset`, `provider`, `baseUrl` — `apiKey` may be empty) and set `activeProfileId` to its id.
 
 ## `.context/active-work.md` rolling state — past sessions are gone
 

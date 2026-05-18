@@ -1,7 +1,7 @@
 ---
 type: overview
 project: codebuff (fork — modded branch)
-updated: 2026-05-18
+updated: 2026-05-19
 tags: [moc, codebuff, llm-proxy, byok]
 ---
 
@@ -9,7 +9,7 @@ tags: [moc, codebuff, llm-proxy, byok]
 
 Upstream Codebuff is a composable coding-agent monorepo where a hosted backend proxies LLM requests to upstream providers and bills users in credits via BigQuery + Stripe. CLI is a TUI built on OpenTUI + React. Also ships `freebuff`, the free tier.
 
-**This fork has been ripped to standalone BYOK** (`modded` branch, published as `codebuff-mod` on npm, v0.1.4 as of 2026-05-18). End users `npm install -g codebuff-mod`, run `cbm`, register a provider profile with `/providers:add <preset> <apiKey>`, and agents run directly against their provider — no codebuff.com account, backend, or billing involved. Upstream backend paths (`web/`, `freebuff/`, codebuff.com auth/billing) are preserved in-tree but gated behind `CODEBUFF_USE_BACKEND=1` so SDK external consumers don't break.
+**This fork has been ripped to standalone BYOK** (`modded` branch, published as `codebuff-mod` on npm, v0.1.8 as of 2026-05-19). End users `npm install -g codebuff-mod`, run `cbm`, register a provider profile with `/providers:add <preset> <apiKey>`, and agents run directly against their provider — no codebuff.com account, backend, or billing involved. Upstream backend paths (`web/`, `freebuff/`, codebuff.com auth/billing) are preserved in-tree but gated behind `CODEBUFF_USE_BACKEND=1` so SDK external consumers don't break.
 
 Upstream is `CodebuffAI/codebuff` (origin points at `EstarinAzx/codebuff`). Divergence is now deep — upstream merges are merge-and-resolve, not drop-in.
 

@@ -80,6 +80,7 @@ describe('database — BYOK backend-skip gate', () => {
   test('finishAgentRun returns undefined without hitting network', async () => {
     const result = await finishAgentRun({
       apiKey: 'ignored',
+      userId: undefined,
       runId: 'run-x',
       status: 'completed',
       totalSteps: 1,
@@ -94,6 +95,7 @@ describe('database — BYOK backend-skip gate', () => {
   test('addAgentStep returns null without hitting network', async () => {
     const result = await addAgentStep({
       apiKey: 'ignored',
+      userId: undefined,
       agentRunId: 'run-x',
       stepNumber: 1,
       credits: 0,

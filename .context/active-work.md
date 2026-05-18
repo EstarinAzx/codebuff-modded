@@ -1,102 +1,102 @@
 ---
 type: active-work
 project: codebuff (fork — modded branch)
-updated: 2026-05-18
+updated: 2026-05-19
 tags: [context, active-work]
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7_
-_At commit: 9b514c8c6 (`modded` tip)_
+_At commit: 92c8b45af (`modded` tip) — 0.1.8 changes uncommitted, ship in progress_
 
 ## Current focus
 
-Nothing in flight. `codebuff-mod@0.1.6` is fully shipped — npm `latest = 0.1.6`,
-GH release `v0.1.6` live with Win x64 + Linux x64/arm64 tarballs attached,
-tag pushed, commit `9b514c8c6` on `modded`. User-side install at
-`~/.config/manicode/codebuff-mod.exe` confirmed at 0.1.6 via `--version`.
-
-0.1.5 introduced per-agent BYOK profile bindings + restored `mod-default` /
-`mod-max` sub-agent spawning (file-picker, code-searcher, thinker;
-code-reviewer for max). 0.1.6 immediately followed with a hotfix: spawning
-any sub-agent with a `handleSteps` generator crashed with
-`Agent state has no run ID` because the 0.1.4 empty-string runId coercion
-left the value falsy and tripped the programmatic-step guard.
+Shipping `codebuff-mod@0.1.8` — a banner rebrand. The CLI logo now reads
+**"CODEBUFF - M"** in full ASCII (the modded mark), and the narrow small
+ASCII logo reads **"CBM"**. Code + typecheck done; publish / commit / push
+is the in-flight final step.
 
 ## State
 
-- **In flight:** Nothing.
-- **Done last session (0.1.5 ship):**
-  - SDK Path C now honors per-agent bindings:
-    `byokAgentBindings[params.agentId] ?? activeByokProfile`.
-  - `setByokAgentBindings()` / `getByokAgentBindings()` exported from SDK.
-  - `ModelRequestParams.agentId?` threaded through 3 `llm.ts` call sites.
-  - `providers.json` schema v2 with `agentBindings: Record<agentId, profileId>`,
-    lazy-migrated on read, pruned on profile mutations.
-  - CLI commands `/providers:bind`, `/providers:unbind`, `/providers:bindings`
-    + sync helper that pushes the map to SDK after every mutation.
-  - Boot push in `cli/src/init/init-app.ts`.
-  - `mod-default` + `mod-max` declare `spawn_agents` + `spawnableAgents`.
-- **Done this session (0.1.6 hotfix):**
-  - `packages/agent-runtime/src/run-agent-step.ts:685` —
-    `startAgentRun()` null result now synthesizes a process-local UUID
-    `byok-<agentTemplate.id>-<uuid>` instead of the previous empty-string
-    coercion. `crypto.randomUUID()` when available; Math.random+Date.now
-    fallback otherwise. Fixes the `Agent state has no run ID` throw at
-    `packages/agent-runtime/src/run-programmatic-step.ts:131` for any
-    spawned sub-agent with a `handleSteps` generator.
-  - Tag `v0.1.6` pushed, GH release published with three fresh tarballs,
-    `codebuff-mod@0.1.6` on npm `latest`. Local Win exe swapped.
+- **In flight:** 0.1.8 ship — publish to npm, commit, push (this session,
+  after `/context-update`).
+- **Done this session (0.1.8 banner rebrand):**
+  - `cli/src/login/constants.ts` — `LOGO_CODEBUFF` is now ASCII
+    "CODEBUFF - M" (~92 cols wide; dropped from the longer "MODDED" idea
+    because the full word blew past terminal width). `LOGO_SMALL_CODEBUFF`
+    is now ASCII "CBM" (was "CB"). Comments updated. Freebuff logos
+    untouched.
+  - `cli/src/hooks/use-logo.tsx` — full-logo width threshold raised
+    `70` → `92` (the wider banner needs the room). Small-logo threshold
+    unchanged at `20`. Docstring updated.
+  - `sdk/src/impl/__tests__/database-byok-skip.test.ts` — added
+    `userId: undefined` to the `finishAgentRun` + `addAgentStep` mock cast
+    objects (lines ~82, ~97). Cleared the pre-existing carry-over
+    typecheck failure (old item 3).
+  - Version bumped 0.1.7 → 0.1.8 in `cli/package.json` +
+    `cli/release/package.json`.
+  - `bun run typecheck` fully green (all workspaces, including
+    `@codebuff/sdk` which previously failed on the two test mocks).
+- **Behavior change:** terminals narrower than 92 cols now render the
+  small "CBM" logo instead of the full banner (was 70-col threshold).
+  Deliberate, user-accepted tradeoff.
 - **Blocked:** Nothing.
 
 ## Pick up here
 
-No queued work. When resuming, check:
+After publish/commit/push completes:
 
-1. Did the wordfreq smoke task succeed end-to-end? Confirm thinker, file
-   creation, terminal runs, and code-reviewer all dispatched without errors.
-   Tail `~/.config/manicode/projects/<cwd>/chats/<latest-iso>/log.jsonl`.
-2. Stray untracked `cli/src/hooks/image/` (orphan PNG from VS Code clipboard
-   paste) — still safe to `rm -r` when convenient.
-3. New stray `image/` at repo root — also untracked, likely same VS Code
-   paste behavior. Inspect before deleting.
-4. Open questions below if scoping expands.
+1. Build the 3 binaries (Win x64 + Linux x64/arm64) via the `C:\cb`
+   junction, hand-tar into `dist-binaries/*.tar.gz`, `gh release create
+   v0.1.8`. (See [[stack]] release commands + [[gotchas]] cross-build
+   workarounds. NOTE: as of this writing only the npm launcher publish +
+   git commit/push were requested — confirm with user whether the GH
+   release binaries for v0.1.8 still need building.)
+2. Swap the user-side local binary at `~/.config/manicode/codebuff-mod.exe`
+   to 0.1.8 once the release is up (keep 0.1.7 as `.exe.017`).
+3. Open questions below.
 
 ## Open questions (carry-over)
 
+- BYOK onboarding nudge — a user with no profile lands in the chat with
+  no provider and no hint. Worth a "run /providers:add to get started"
+  empty-state message?
 - macOS x64 + arm64 binaries — build on borrowed Mac or defer indefinitely?
 - Phase 3b/c OpenTUI providers panel — still worth doing now that text-mode
-  `/providers*` commands cover the full feature surface (including bind),
-  or treat as final UX?
-- Hard-delete `web/` and `freebuff/` once 0.1.6 stays stable in the wild?
+  `/providers*` commands cover the full feature surface?
+- Hard-delete `web/` and `freebuff/` once 0.1.x stays stable in the wild?
   Path B is gated behind `CODEBUFF_USE_BACKEND=1` with zero known consumers.
-- Expand mod-max `spawnableAgents` to include `librarian`, `researcher-web`,
-  `editor`? Bigger surface = more `/providers:bind` knobs for cost tuning,
-  but each new spawn target is one more thing to validate end-to-end.
+- `LoginModal` + `cli/src/login/*` login mutation are dead code in the
+  default CLI (reachable only under `CODEBUFF_USE_BACKEND=1`). Delete, or
+  keep for the backend escape hatch? (Note: `login/constants.ts` still
+  hosts the ASCII logos used by the live chat surface — only the login
+  *flow* is dead, not the whole dir.)
 
 ## Security carry-over
 
-- Previously-leaked OpenCode key revoked at opencode.ai on 2026-05-19. Local
-  `~/.config/manicode/providers.json` + `~/.local/share/opencode/auth.json`
-  rotated to a fresh key. No further action required.
+- Previously-leaked OpenCode key revoked at opencode.ai on 2026-05-19. The
+  revoked key string still sits in plaintext in
+  `~/.config/manicode/message-history.json`. User declined a scrub — local
+  PC, key already dead. No action.
 
 ## Skills for next session
 
-- `/to-issues` — if macOS binaries / web+freebuff deletion / v2 per-agent
-  model overlays get turned into trackable tickets.
-- `/grill-me` — if scoping Phase 3b/c OpenTUI providers panel.
+- `/to-issues` — if macOS binaries / web+freebuff deletion / login dead-code
+  removal get turned into trackable tickets.
+- `/grill-me` — if scoping the BYOK onboarding empty-state.
 
 ## Recent context
 
-- 0.1.6 fix only touched one file (`run-agent-step.ts`). All other
-  agent-runtime sites that read `agentState.runId` were already guarded
-  (line 307, 353 truthy-check before backend writes; line 145 has
-  `?? 'undefined'` fallback). UUID synthesis is the minimum invasive fix.
-- bun cross-compile to Linux from Windows still requires the `C:\cb`
+- 0.1.8 is cosmetic only — no behavior change beyond the logo width
+  threshold. `@codebuff/cli` typecheck passes clean.
+- All `useLogo` consumers (app, login-modal, project-picker,
+  waiting-room, freebuff-superseded) share the single threshold in
+  `use-logo.tsx` — no per-consumer edits needed for the rebrand.
+- `build:binary` runs `prebuild-agents` + sdk build internally; output
+  lands in `cli/bin/`, then must be hand-tarred into `dist-binaries/`.
+- bun cross-compile to Linux from Windows still needs the `C:\cb`
   junction workaround (see [[gotchas]]).
-- Defender real-time scan still locks freshly-built `codebuff-mod.exe` on
-  copy; rename-target-then-copy still works around it.
 
 ## Related
 

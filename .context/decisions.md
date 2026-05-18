@@ -1,13 +1,31 @@
 ---
 type: decisions
 project: codebuff (fork — modded branch)
-updated: 2026-05-18
+updated: 2026-05-19
 tags: [decisions, modded]
 ---
 
 # Decisions — fork-local
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
+
+## 2026-05-19 — Banner mark is "CODEBUFF - M", not "- MODDED" (0.1.8)
+
+**Decision:** The full ASCII logo (`LOGO_CODEBUFF` in `cli/src/login/constants.ts`) renders "CODEBUFF - M" — the modded suffix abbreviated to a single block letter. The small ASCII logo renders "CBM". The full word "MODDED" in block ASCII was tried and rejected; it pushed the banner to ~135 cols.
+
+**Why:** Block-letter ASCII at the figlet "ANSI Shadow" scale costs ~9–11 cols per glyph. Full "CODEBUFF - MODDED" is ~135 cols — wider than nearly every real terminal, so it would have fallen back to the small logo for almost everyone, defeating the rebrand. "CODEBUFF - M" lands at ~92 cols, which fits standard 100–120 col terminals. The full-logo width threshold in `use-logo.tsx` was raised `70` → `92` to match; terminals 20–91 cols wide now show the small "CBM" logo (previously they got the full banner down to 70 cols). Accepted as a deliberate tradeoff — the alternative was a banner almost no one sees.
+
+**Reversibility:** easy — cosmetic, two-file revert (`constants.ts` art + `use-logo.tsx` threshold). No behavior impact beyond which logo size renders at a given width.
+
+## 2026-05-19 — Skip the codebuff.com login gate entirely in BYOK mode (0.1.7)
+
+**Decision:** The CLI startup gate (`cli/src/index.tsx`) and the auth-validation query (`cli/src/hooks/use-auth-query.ts`) no longer hard-require a codebuff.com session. The startup gate sets `requireAuth=false` whenever an active BYOK profile exists **OR** `CODEBUFF_USE_BACKEND !== '1'`. `validateApiKey()` returns the synthetic local user whenever `CODEBUFF_USE_BACKEND !== '1'`, not only when a profile is active. Net effect: in the default BYOK CLI the `LoginModal` is unreachable; it renders only under the explicit `CODEBUFF_USE_BACKEND=1` escape hatch.
+
+**Why:** The fork ripped out the codebuff.com backend, but the login gate survived as a hard wall. A user with no provider profile and no `credentials.json` — a fresh `npm i -g codebuff-mod`, or anyone who ran `/logout`, or (the actual report) someone who `/providers:remove`d all their profiles — was trapped on a `LoginModal` whose `POST /api/auth/cli/code` targets `http://127.0.0.1:1` (unset backend host) and can never connect. `LoginModal` renders *before* the chat input, so there was no way to reach `/providers:add` to escape. The existing BYOK escape hatches (`getUserCredentials` synthetic fallback, `validateApiKey` short-circuit) all gated on `getActiveProfile()` being truthy — useless precisely when the user has zero profiles. Two alternatives considered: (a) replace `LoginModal` with a BYOK provider-onboarding screen — better UX but a much larger change; (b) detect backend reachability at runtime — flaky, network-dependent. Picked the env-gate approach because it matches the existing `shouldSkipBackend()` / Path C pattern (`CODEBUFF_USE_BACKEND` is already the fork's one backend toggle) and is deterministic.
+
+**Trade-off accepted:** A user with no profile now lands directly in the chat surface with no provider configured — agent runs fail until they `/providers:add`. No onboarding nudge yet (carry-over open question). Better than a hard lockout.
+
+**Reversibility:** easy — revert the `index.tsx` + `use-auth-query.ts` edits to restore the upstream gate. Also added the fork's BYOK files to `additionalProcessEnvAllowlist` in `scripts/check-env-architecture.ts` (they gate on raw `process.env.CODEBUFF_USE_BACKEND` / `CODEBUFF_PROVIDERS_PATH`); those lines were *already* failing the env-architecture check before 0.1.7 — the fork shipped via `build:binary` direct, which skips the full `bun run typecheck` gate. The allowlist unbreaks that pre-existing debt.
 
 ## 2026-05-18 — Synthesize runId UUID in BYOK instead of empty-string coercion (0.1.6)
 
