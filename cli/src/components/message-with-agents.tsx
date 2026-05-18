@@ -21,6 +21,7 @@ import {
   hasMarkdown,
   type MarkdownPalette,
 } from '../utils/markdown-renderer'
+import { BORDER_CHARS } from '../utils/ui-constants'
 
 import type { ChatMessage } from '../types/chat'
 import type { FeedbackCategory } from '@codebuff/common/constants/feedback'
@@ -216,6 +217,43 @@ export const MessageWithAgents = memo(
     // Show vertical line for user messages (including bash commands which are now user messages)
     const showVerticalLine = isUser
 
+    const messageBlockEl = (
+      <MessageBlock
+        messageId={message.id}
+        blocks={message.blocks}
+        content={message.content}
+        isUser={isUser}
+        isAi={isAi}
+        isLoading={isLoading}
+        timestamp={message.timestamp}
+        isComplete={message.isComplete}
+        completionTime={message.completionTime}
+        credits={message.credits}
+        timerStartTime={timerStartTime}
+        textColor={textColor}
+        timestampColor={timestampColor}
+        markdownOptions={markdownOptions}
+        availableWidth={availableWidth}
+        markdownPalette={markdownPalette!}
+        onToggleCollapsed={onToggleCollapsed}
+        onBuildFast={onBuildFast}
+        onBuildMax={onBuildMax}
+        onBuildLite={onBuildLite}
+        onFeedback={onFeedback}
+        onCloseFeedback={onCloseFeedback}
+        validationErrors={message.validationErrors}
+        userError={message.userError}
+        onOpenFeedback={onOpenFeedback}
+        attachments={message.attachments}
+        textAttachments={message.textAttachments}
+        fileAttachments={message.fileAttachments}
+        metadata={message.metadata}
+        isLastMessage={isLastMessage}
+      />
+    )
+
+    const aiBorderColor = theme?.secondary ?? theme?.aiLine ?? 'white'
+
     return (
       <box
         key={message.id}
@@ -250,76 +288,20 @@ export const MessageWithAgents = memo(
                   marginBottom: 0,
                 }}
               />
-              <box style={contentBoxStyle}>
-                <MessageBlock
-                  messageId={message.id}
-                  blocks={message.blocks}
-                  content={message.content}
-                  isUser={isUser}
-                  isAi={isAi}
-                  isLoading={isLoading}
-                  timestamp={message.timestamp}
-                  isComplete={message.isComplete}
-                  completionTime={message.completionTime}
-                  credits={message.credits}
-                  timerStartTime={timerStartTime}
-                  textColor={textColor}
-                  timestampColor={timestampColor}
-                  markdownOptions={markdownOptions}
-                  availableWidth={availableWidth}
-                  markdownPalette={markdownPalette!}
-                  onToggleCollapsed={onToggleCollapsed}
-                  onBuildFast={onBuildFast}
-                  onBuildMax={onBuildMax}
-                  onBuildLite={onBuildLite}
-                  onFeedback={onFeedback}
-                  onCloseFeedback={onCloseFeedback}
-                  validationErrors={message.validationErrors}
-                  userError={message.userError}
-                  onOpenFeedback={onOpenFeedback}
-                  attachments={message.attachments}
-                  textAttachments={message.textAttachments}
-                  fileAttachments={message.fileAttachments}
-                  metadata={message.metadata}
-                  isLastMessage={isLastMessage}
-                />
-              </box>
+              <box style={contentBoxStyle}>{messageBlockEl}</box>
+            </box>
+          ) : isAi ? (
+            <box
+              border
+              borderStyle="single"
+              borderColor={aiBorderColor}
+              customBorderChars={BORDER_CHARS}
+              style={contentBoxStyle}
+            >
+              {messageBlockEl}
             </box>
           ) : (
-            <box style={contentBoxStyle}>
-              <MessageBlock
-                messageId={message.id}
-                blocks={message.blocks}
-                content={message.content}
-                isUser={isUser}
-                isAi={isAi}
-                isLoading={isLoading}
-                timestamp={message.timestamp}
-                isComplete={message.isComplete}
-                completionTime={message.completionTime}
-                credits={message.credits}
-                timerStartTime={timerStartTime}
-                textColor={textColor}
-                timestampColor={timestampColor}
-                markdownOptions={markdownOptions}
-                availableWidth={availableWidth}
-                markdownPalette={markdownPalette!}
-                onToggleCollapsed={onToggleCollapsed}
-                onBuildFast={onBuildFast}
-                onBuildMax={onBuildMax}
-                onBuildLite={onBuildLite}
-                onFeedback={onFeedback}
-                onCloseFeedback={onCloseFeedback}
-                validationErrors={message.validationErrors}
-                userError={message.userError}
-                onOpenFeedback={onOpenFeedback}
-                attachments={message.attachments}
-                textAttachments={message.textAttachments}
-                fileAttachments={message.fileAttachments}
-                metadata={message.metadata}
-                isLastMessage={isLastMessage}
-              />
-            </box>
+            <box style={contentBoxStyle}>{messageBlockEl}</box>
           )}
         </box>
 
