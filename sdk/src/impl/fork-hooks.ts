@@ -50,12 +50,14 @@ export interface ForkHooks {
   ) => Awaited<GetUserInfoFromApiKeyOutput<T>> | null
 
   /**
-   * Synthesize a process-local runId when central run-tracking is skipped
-   * (BYOK mode). Must return a truthy string; downstream code asserts on it.
-   * Receives the agent template id so logs are greppable
-   * (e.g., `byok-mod-default-<uuid>`).
+   * Synthesize a process-local runId when central run-tracking returns null.
+   * Must return a truthy string when in BYOK mode (downstream code asserts
+   * on truthy runId) — receives the agent template id so logs are greppable
+   * (e.g., `byok-mod-default-<uuid>`). Returns `null` when the fork is not
+   * active so the upstream `Failed to start agent run` throw still fires
+   * for non-BYOK consumers.
    */
-  synthRunId?: (templateId: string) => string
+  synthRunId?: (templateId: string) => string | null
 
   /**
    * Whether a React hook that touches codebuff.com should short-circuit at

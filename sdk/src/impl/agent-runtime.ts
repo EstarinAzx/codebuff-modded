@@ -11,16 +11,31 @@ import {
   getUserInfoFromApiKey,
   startAgentRun,
 } from './database'
+import { getForkHooks } from './fork-hooks'
 import { promptAiSdk, promptAiSdkStream, promptAiSdkStructured } from './llm'
 
 import type {
   AgentRuntimeDeps,
   AgentRuntimeScopedDeps,
 } from '@codebuff/common/types/contracts/agent-runtime'
-import type { DatabaseAgentCache } from '@codebuff/common/types/contracts/database'
+import type {
+  DatabaseAgentCache,
+  StartAgentRunFn,
+} from '@codebuff/common/types/contracts/database'
 import type { ClientEnv } from '@codebuff/common/types/contracts/env'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
 import type { TrackEventFn } from '@codebuff/common/types/contracts/analytics'
+
+// Fork-aware startAgentRun: when codebuff.com run-tracking returns null
+// (BYOK mode), the synthRunId hook mints a process-local UUID so the
+// upstream `Failed to start agent run` throw doesn't fire. Non-fork
+// consumers see the hook as undefined and the contract's null falls
+// through to the upstream throw unchanged.
+const forkAwareStartAgentRun: StartAgentRunFn = async (params) => {
+  const real = await startAgentRun(params)
+  if (real) return real
+  return getForkHooks().synthRunId?.(params.agentId) ?? null
+}
 
 const databaseAgentCache: DatabaseAgentCache = new Map()
 
@@ -76,7 +91,7 @@ export function getAgentRuntimeImpl(
     // Database
     getUserInfoFromApiKey,
     fetchAgentFromDatabase,
-    startAgentRun,
+    startAgentRun: forkAwareStartAgentRun,
     finishAgentRun,
     addAgentStep,
 

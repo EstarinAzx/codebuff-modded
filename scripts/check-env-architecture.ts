@@ -110,6 +110,9 @@ const packageConfigs: PackageConfig[] = [
       // BYOK fork: shouldSkipBackend gates the codebuff.com backend skip on
       // the CODEBUFF_USE_BACKEND escape hatch.
       'sdk/src/impl/fork-impls/backend-skip.ts',
+      // BYOK fork: runId synth uses the same env gate to decide whether to
+      // mint a process-local UUID or fall through to upstream throw.
+      'sdk/src/impl/fork-impls/runid-synth.ts',
     ],
   },
 ]

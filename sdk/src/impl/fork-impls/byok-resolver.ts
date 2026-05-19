@@ -28,6 +28,7 @@ import { registerForkHooks } from '../fork-hooks'
 import { createOpenAIOAuthModel } from '../model-provider'
 
 import './backend-skip'
+import './runid-synth'
 
 import type { ModelRequestParams, ModelResult } from '../model-provider'
 import type { LanguageModel } from 'ai'
