@@ -29,18 +29,47 @@ export const CHATGPT_OAUTH_TOKEN_ENV_VAR = 'CODEBUFF_CHATGPT_OAUTH_TOKEN'
  * This includes optimistic aliases requested by the user.
  */
 export const OPENROUTER_TO_OPENAI_MODEL_MAP: Record<string, string> = {
+  // GPT-5.5 — latest, strongest reasoning (top of picker)
+  'openai/gpt-5.5': 'gpt-5.5',
+
+  // GPT-5.4 family
   'openai/gpt-5.4': 'gpt-5.4',
   'openai/gpt-5.4-codex': 'gpt-5.4-codex',
+  'openai/gpt-5.4-mini': 'gpt-5.4-mini',
+
+  // GPT-5.3 family
   'openai/gpt-5.3': 'gpt-5.3',
   'openai/gpt-5.3-codex': 'gpt-5.3-codex',
+  'openai/gpt-5.3-codex-spark': 'gpt-5.3-codex-spark',
+
+  // GPT-5.2 family
   'openai/gpt-5.2': 'gpt-5.2',
   'openai/gpt-5.2-codex': 'gpt-5.2-codex',
 
-  // Nearby/optimistic aliases supported in current model config.
+  // GPT-5.1 family
   'openai/gpt-5.1': 'gpt-5.1',
   'openai/gpt-5.1-chat': 'gpt-5.1-chat',
+  'openai/gpt-5.1-codex-max': 'gpt-5.1-codex-max',
+  'openai/gpt-5.1-codex-mini': 'gpt-5.1-codex-mini',
+
+  // GPT-5 mini
+  'openai/gpt-5-mini': 'gpt-5-mini',
+
+  // O-series reasoning
+  'openai/o4-mini': 'o4-mini',
+  'openai/o3': 'o3',
+
+  // GPT-4.1 fallback
+  'openai/gpt-4.1': 'gpt-4.1',
+  'openai/gpt-4.1-mini': 'gpt-4.1-mini',
+
+  // GPT-4o (legacy stable)
   'openai/gpt-4o-2024-11-20': 'gpt-4o-2024-11-20',
   'openai/gpt-4o-mini-2024-07-18': 'gpt-4o-mini-2024-07-18',
+
+  // Codex-CLI aliases — backend resolves these to specific upstream models
+  'openai/codexspark': 'codexspark',
+  'openai/codexplan': 'codexplan',
 }
 
 export const CHATGPT_OAUTH_OPENAI_MODEL_ALLOWLIST = Object.keys(
