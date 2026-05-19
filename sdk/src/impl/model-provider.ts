@@ -2,20 +2,15 @@
  * Model provider abstraction for routing requests to the appropriate LLM provider.
  *
  * Dispatch order:
- * - Path C (BYOK): when an active BYOK profile is set via `setActiveByokProfile()`,
- *   route the request directly to the profile's provider HTTP endpoint with the
- *   user's own API key. No codebuff.com involvement.
+ * - Fork Path C (BYOK): hook installed via `registerForkHooks({ resolveByok })`
+ *   short-circuits when an active BYOK profile is set. No-op when fork is
+ *   absent. Implementation lives in `./fork-impls/byok-resolver.ts`.
  * - Path A (ChatGPT OAuth): direct OpenAI/Codex requests using the user's OAuth token.
  * - Path B (Codebuff backend): requests through codebuff.com (routes to OpenRouter).
- *
- * Path C takes precedence — once a profile is registered, it owns the dispatch.
- * SDK consumers that never call `setActiveByokProfile()` retain pre-existing
- * behavior (Path A / Path B).
  */
 
 import path from 'path'
 
-import { createAnthropic } from '@ai-sdk/anthropic'
 import { BYOK_OPENROUTER_HEADER } from '@codebuff/common/constants/byok'
 import { isFreeMode } from '@codebuff/common/constants/free-agents'
 import {
@@ -32,7 +27,6 @@ import {
 } from '@codebuff/internal/openai-compatible/index'
 
 import { WEBSITE_URL } from '../constants'
-import { getValidCodexCredentials } from '../codex-credentials'
 import {
   getValidChatGptOAuthCredentials,
 } from '../credentials'
@@ -41,124 +35,9 @@ import {
   createChatGptBackendFetch,
   extractChatGptAccountId,
 } from './chatgpt-backend-fetch'
+import { getForkHooks } from './fork-hooks'
 
 import type { LanguageModel } from 'ai'
-
-// ============================================================================
-// BYOK Profile (Path C)
-// ============================================================================
-
-/**
- * Minimal shape the SDK needs from a BYOK profile to route a request directly.
- * The CLI's full `ProviderProfile` (with id / createdAt / preset metadata) is a
- * structural superset; pass it straight to `setActiveByokProfile`.
- */
-export type BYOKProfile = {
-  /** Wire protocol — picks the provider client. */
-  provider: 'openai' | 'anthropic'
-  /** Provider base URL (no trailing slash). */
-  baseUrl: string
-  /** API key for Authorization: Bearer. */
-  apiKey: string
-  /**
-   * Optional model id. When set, Path C resolves to this model regardless of
-   * what the agent template requested — single BYOK profile uses one model
-   * across all agents (v1 limitation, swap with `/model`).
-   * When empty, the agent template's `params.model` is used as-is (useful when
-   * the template's id is one the user's provider actually serves).
-   */
-  model?: string
-  /**
-   * When set, Path C dispatches through the ChatGPT backend (Codex endpoint)
-   * using the per-profile OAuth token stored at
-   * `~/.config/manicode/codex-oauth.json` keyed by this id. apiKey is ignored
-   * for these profiles. Set for `codex` preset profiles only.
-   */
-  oauthProfileId?: string
-}
-
-let activeByokProfile: BYOKProfile | null = null
-
-/**
- * Per-agent BYOK profile overrides. Maps agentId → profile. When a spawned
- * agent has a binding, Path C dispatches through that profile instead of the
- * active profile. CLI pushes the full map via `setByokAgentBindings()` on
- * startup and after every `/providers:bind` / `/providers:unbind`.
- *
- * PORT: if upstream introduces a similar mechanism, this is the merge point.
- */
-let byokAgentBindings: Record<string, BYOKProfile> = {}
-
-function normalizeProfile(profile: BYOKProfile, label: string): BYOKProfile {
-  const baseUrl = (profile.baseUrl ?? '').replace(/\/+$/, '')
-  if (
-    (profile.provider !== 'openai' && profile.provider !== 'anthropic') ||
-    !baseUrl ||
-    typeof profile.apiKey !== 'string'
-  ) {
-    throw new Error(`${label}: invalid profile shape`)
-  }
-  return {
-    provider: profile.provider,
-    baseUrl,
-    apiKey: profile.apiKey,
-    model: typeof profile.model === 'string' && profile.model.length > 0
-      ? profile.model
-      : undefined,
-    oauthProfileId:
-      typeof profile.oauthProfileId === 'string' &&
-      profile.oauthProfileId.length > 0
-        ? profile.oauthProfileId
-        : undefined,
-  }
-}
-
-/**
- * Register (or clear) the BYOK profile the SDK should route through.
- * Pass `null` to revert to Path A / Path B behavior.
- *
- * Called by the CLI at startup with the active profile from
- * `~/.config/manicode/providers.json`, and again on `/providers:select`.
- */
-export function setActiveByokProfile(profile: BYOKProfile | null): void {
-  if (profile === null) {
-    activeByokProfile = null
-    return
-  }
-  activeByokProfile = normalizeProfile(profile, 'setActiveByokProfile')
-}
-
-export function getActiveByokProfile(): BYOKProfile | null {
-  return activeByokProfile
-}
-
-/**
- * Replace the full agent → profile binding map. Pass `{}` to clear all
- * bindings. Invalid entries are skipped with a `console.warn`; the rest of
- * the map is still applied so one bad row does not break the whole feature.
- */
-export function setByokAgentBindings(
-  bindings: Record<string, BYOKProfile> | null,
-): void {
-  if (!bindings) {
-    byokAgentBindings = {}
-    return
-  }
-  const next: Record<string, BYOKProfile> = {}
-  for (const [agentId, profile] of Object.entries(bindings)) {
-    if (!agentId || !profile) continue
-    try {
-      next[agentId] = normalizeProfile(profile, `setByokAgentBindings[${agentId}]`)
-    } catch (err) {
-      console.warn(`Skipping invalid BYOK binding for "${agentId}":`, err)
-    }
-  }
-  byokAgentBindings = next
-}
-
-export function getByokAgentBindings(): Record<string, BYOKProfile> {
-  return byokAgentBindings
-}
 
 // ============================================================================
 // ChatGPT OAuth Rate Limit Cache
@@ -213,9 +92,8 @@ export interface ModelRequestParams {
   /** Cost mode (e.g. 'free') — affects fallback behavior for OAuth routes */
   costMode?: string
   /**
-   * Optional agent id (e.g. 'file-picker', 'mod-default'). When set and a
-   * BYOK binding exists for it, Path C uses the bound profile instead of the
-   * active profile. Ignored by Path A / Path B.
+   * Optional agent id (e.g. 'file-picker', 'mod-default'). Threaded through
+   * so the fork's BYOK hook can per-agent route. Ignored by Path A / Path B.
    */
   agentId?: string
 }
@@ -243,52 +121,14 @@ type OpenRouterUsageAccounting = {
  *
  * If ChatGPT OAuth credentials are available and the model is an OpenAI model,
  * returns an OpenAI direct model. Otherwise, returns the Codebuff backend model.
- * 
+ *
  * This function is async because it may need to refresh the OAuth token.
  */
 export async function getModelForRequest(params: ModelRequestParams): Promise<ModelResult> {
-  const { apiKey, model, skipChatGptOAuth, costMode, agentId } = params
+  const { apiKey, model, skipChatGptOAuth, costMode } = params
 
-  // Path C — BYOK profile (highest precedence when registered).
-  // No-op for SDK consumers that never call setActiveByokProfile().
-  // Per-agent binding (if any) overrides the active profile so a single
-  // CLI session can hit different providers/models for different sub-agents.
-  const boundProfile =
-    agentId && byokAgentBindings[agentId] ? byokAgentBindings[agentId] : null
-  const profileForRequest = boundProfile ?? activeByokProfile
-  if (profileForRequest) {
-    // Profile-pinned model wins so a single BYOK profile is internally consistent
-    // (agent templates would otherwise request models the user's provider can't
-    // serve). User swaps with /model; see cli/src/commands/providers.ts.
-    const resolvedModel = profileForRequest.model ?? model
-
-    // OAuth-backed profile (codex preset) — dispatch through the ChatGPT
-    // backend with the profile's per-profileId OAuth token instead of the
-    // direct-provider HTTP path. apiKey is ignored.
-    if (profileForRequest.oauthProfileId) {
-      const credentials = await getValidCodexCredentials(
-        profileForRequest.oauthProfileId,
-      )
-      if (!credentials) {
-        throw new Error(
-          `Codex OAuth credentials unavailable or expired for profile ` +
-            `"${profileForRequest.oauthProfileId}". Re-run /providers:add codex.`,
-        )
-      }
-      return {
-        model: createOpenAIOAuthModel(resolvedModel, credentials.accessToken),
-        isChatGptOAuth: true,
-      }
-    }
-
-    return {
-      model: createDirectProviderModel({
-        profile: profileForRequest,
-        model: resolvedModel,
-      }),
-      isChatGptOAuth: false,
-    }
-  }
+  const forked = await getForkHooks().resolveByok?.(params)
+  if (forked) return forked
 
   // Check if we should use ChatGPT OAuth direct
   // Only attempt for allowlisted models; non-allowlisted models silently fall through to backend.
@@ -348,48 +188,13 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
 }
 
 /**
- * Path C factory — route a request directly to a user-supplied provider
- * (OpenAI-compat or Anthropic) using their own API key. No codebuff.com.
- *
- * The `model` argument is the resolved model id from the caller (agent
- * template / runtime). Profile-level `model` field is the CLI's fallback
- * default and is applied higher up; the SDK sees the already-resolved id.
- */
-function createDirectProviderModel(params: {
-  profile: BYOKProfile
-  model: string
-}): LanguageModel {
-  const { profile, model } = params
-  const baseUrl = profile.baseUrl.replace(/\/+$/, '')
-
-  if (profile.provider === 'anthropic') {
-    const anthropic = createAnthropic({
-      baseURL: baseUrl,
-      apiKey: profile.apiKey,
-    })
-    return anthropic(model)
-  }
-
-  // openai-compat branch: openai, opencode, opencode-go, openrouter,
-  // mistral, together, groq, deepseek, gemini, custom-openai
-  return new OpenAICompatibleChatLanguageModel(model, {
-    provider: 'byok',
-    url: ({ path: endpoint }) => `${baseUrl}${endpoint}`,
-    headers: () => ({
-      Authorization: `Bearer ${profile.apiKey}`,
-      'user-agent': `ai-sdk/openai-compatible/${VERSION}/codebuff-byok`,
-    }),
-    fetch: undefined,
-    supportsStructuredOutputs: true,
-    includeUsage: undefined,
-  })
-}
-
-/**
  * Create an OpenAI model that routes through the ChatGPT backend API (Codex endpoint).
  * Uses a custom fetch that transforms between Chat Completions and Responses API formats.
+ *
+ * Exported so the fork's BYOK Path C-oauth (codex preset) can dispatch through
+ * the same ChatGPT-backend code path Path A uses.
  */
-function createOpenAIOAuthModel(model: string, oauthToken: string): LanguageModel {
+export function createOpenAIOAuthModel(model: string, oauthToken: string): LanguageModel {
   const openAIModelId = toOpenAIModelId(model)
   const accountId = extractChatGptAccountId(oauthToken)
 
@@ -482,3 +287,18 @@ function createCodebuffBackendModel(
     supportsStructuredOutputs: true,
   })
 }
+
+// ============================================================================
+// Fork re-exports — BYOK Path C surface lives in ./fork-impls/byok-resolver.
+// Kept here so existing import sites (`sdk/src/index.ts`, `database.ts`, tests)
+// resolve unchanged. Re-exports are bottom-of-file to keep this region
+// upstream-merge-cold.
+// ============================================================================
+
+export {
+  setActiveByokProfile,
+  getActiveByokProfile,
+  setByokAgentBindings,
+  getByokAgentBindings,
+} from './fork-impls/byok-resolver'
+export type { BYOKProfile } from './fork-impls/byok-resolver'
