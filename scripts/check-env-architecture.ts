@@ -90,14 +90,14 @@ const packageConfigs: PackageConfig[] = [
       'cli/src/hooks/use-auth-query.ts',
       'cli/src/utils/providers.ts',
       'cli/src/utils/providers-models.ts',
-      // 0.1.10 BYOK env-gate propagation — React hooks + LoginModal render gate +
-      // /logout short-circuit all check CODEBUFF_USE_BACKEND directly. Same
-      // env-first / profile-fallback pattern as the SDK-side shouldSkipBackend().
+      // 0.1.10 BYOK env-gate propagation — LoginModal render gate +
+      // /logout short-circuit check CODEBUFF_USE_BACKEND directly. The three
+      // React hooks moved to a fork-hook impl (see below).
       'cli/src/app.tsx',
       'cli/src/commands/command-registry.ts',
-      'cli/src/hooks/use-agent-validation.ts',
-      'cli/src/hooks/use-connection-status.ts',
-      'cli/src/hooks/use-gravity-ad.ts',
+      // BYOK fork-impl: module-load-time gate for backend-touching React hooks.
+      // Single home for the env-first / profile-fallback predicate.
+      'cli/src/fork-impls/skip-react-hook.ts',
     ],
   },
   {
