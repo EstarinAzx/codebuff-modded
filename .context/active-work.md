@@ -3,52 +3,48 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
 tags: [context, active-work]
-ship: 0.1.11 (shipped)
+ship: 0.1.12 (shipped)
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7_
-_At commit: `modded` tip `f70d71f28` (0.1.11 ship)_
+_At commit: `modded` tip `679464be2` (0.1.12 ship)_
 
 ## Current focus
 
-Nothing in flight. `codebuff-mod@0.1.11` is published — npm package,
+Nothing in flight. `codebuff-mod@0.1.12` is published — npm package,
 GH release with all three platform tarballs (win32-x64, linux-x64,
-linux-arm64), tag `v0.1.11` pushed, local user-side binary swapped
-(prior 0.1.10 archived as `codebuff-mod.exe.0110`).
+linux-arm64), tag `v0.1.12` pushed, local user-side binary swapped
+(prior 0.1.11 archived as `codebuff-mod.exe.0111`).
 
 ## State
 
 - **In flight:** nothing.
-- **Recently shipped — 0.1.11 (commit `f70d71f28`):** cosmetic only.
-  AI assistant message bubbles now render in a single-line bordered
-  panel matching the sub-agent expanded panel (`agent-branch-item.tsx`)
-  and the runtime error banner (`user-error-banner.tsx`). One file
-  touched: `cli/src/components/message-with-agents.tsx`.
-  - Border color resolves `theme.secondary ?? theme.aiLine` so it
-    tracks the active theme without a new token.
-  - Shared `<MessageBlock />` extracted to a local element so the
-    three render branches (user-line / ai-bordered / plain) no
-    longer duplicate the 27-prop call site.
-  - User messages keep their left vertical line. Error variants keep
-    the plain wrapper (their `UserErrorBanner` paints its own red
-    border inside `MessageBlock`). The recursive sub-agent render
-    path (`AgentMessage`) is untouched.
+- **Recently shipped — 0.1.12 (commit `679464be2`):** cosmetic refinement
+  of 0.1.11. The bordered AI panel now hugs only the assistant's final
+  textual reply. Thinking blocks, tool calls, and sub-agent groups render
+  plain above the frame; `UserErrorBanner` + `MessageFooter` stay nested
+  inside it. Pure tool-turn AI messages (no trailing prose) suppress the
+  border entirely. Touched: `cli/src/components/message-with-agents.tsx`
+  (reverted the message-level border) and `cli/src/components/message-block.tsx`
+  (block partition at the last non-reasoning `text` block; preface
+  blocks render plain, tail run renders inside the bordered box).
+- **Recently shipped — 0.1.11 (commit `f70d71f28`):** initial cosmetic
+  pass that wrapped the entire AI message in a bordered panel. Superseded
+  by 0.1.12 — too wide; user wanted only the prose framed.
 - **Recently shipped — 0.1.10 (commit `1709a34ce` + docs sync
   `2700c5f07`):** closed two BYOK gates 0.1.7 missed (fresh-install
   "connecting…" stuck indicator and `/logout` re-triggering the dead
   `LoginModal`). See [[decisions]] for the full rationale.
-- **Typecheck at 0.1.11 ship:** `bun run --filter='@codebuff/cli'
+- **Typecheck at 0.1.12 ship:** `bun run --filter='@codebuff/cli'
   typecheck` clean.
-- **Test status at 0.1.11 ship:** 4 pre-existing `MessageBlockStore`
-  test failures in `message-with-agents.test.tsx` verified
-  non-regression (same 18 pass / 4 fail with and without the diff).
-  Broader 14 pre-existing test failures from 0.1.10 baseline remain
-  unaddressed (categories: `usePathTabCompletion` Windows-path-slash
-  quirks, `fetchUsageData` env-config missing
-  `NEXT_PUBLIC_CODEBUFF_APP_URL`, `logout-relogin-flow` colliding
-  with the BYOK synthetic-user escape hatch).
+- **Test status at 0.1.12 ship:** broader 14 pre-existing test
+  failures from the 0.1.10 baseline remain unaddressed and unchanged
+  (categories: `usePathTabCompletion` Windows-path-slash quirks,
+  `fetchUsageData` env-config missing `NEXT_PUBLIC_CODEBUFF_APP_URL`,
+  `logout-relogin-flow` colliding with the BYOK synthetic-user escape
+  hatch).
 - **Working tree:** clean (only untracked artifact is
   `.context/image/decisions/`, an image dir).
 
@@ -65,7 +61,7 @@ new user direction.
   never typed `/logout`) is still silent. Worth a "run `/providers:add`
   to get started" empty-state message?
 - **macOS x64 + arm64 binaries** — build on borrowed Mac or defer
-  indefinitely? 0.1.11 ships only win32-x64, linux-x64, linux-arm64.
+  indefinitely? 0.1.12 ships only win32-x64, linux-x64, linux-arm64.
 - **Phase 3b/c OpenTUI providers panel** — still worth doing now that
   text-mode `/providers*` commands cover the full feature surface?
 - **Hard-delete `web/` and `freebuff/`** once 0.1.x stays stable in
@@ -91,10 +87,17 @@ new user direction.
 
 ## Recent context
 
-- 0.1.11 is purely cosmetic; no behavior change. Visual parity now
-  achieved between AI message bubble, sub-agent expanded panel, and
-  the error banner — they all use the same `BORDER_CHARS` rounded
-  glyphs at single-line weight.
+- 0.1.12 narrows the 0.1.11 border so only the assistant's final prose
+  is framed. Implementation lives in `message-block.tsx`: when `isAi`,
+  scan `blocks` from the end for the last non-reasoning `text` block,
+  slice into `aiPrefaceBlocks` (rendered plain) and `aiTailBlocks`
+  (rendered inside the bordered box along with `UserErrorBanner` and
+  `MessageFooter`). String-only AI content (`!blocks`) also gets the
+  border. Pure tool turns with no trailing prose suppress the border
+  but still surface the footer below.
+- 0.1.11 was the initial bordered-AI pass; everything in the AI message
+  was inside the frame, which dragged thinking / tools / sub-agents in
+  with it. 0.1.12 is the corrective ship.
 - 0.1.10 propagated the `CODEBUFF_USE_BACKEND !== '1'` env-gate from
   two surfaces (added in 0.1.7) to four more, closing the
   fresh-install lockout fully. After this, the BYOK default is free
