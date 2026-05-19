@@ -64,7 +64,15 @@ const definition: AgentDefinition = {
 - Use \`ask_user\` only for irreversible or ambiguous choices. Bias toward acting on reasonable defaults.
 - Output should be a tight summary of what changed and what was verified. No filler.`,
 
-  instructionsPrompt: `Read the user request, gather just enough context, plan with \`write_todos\` if the task has 3+ steps, edit with \`str_replace\` (preferred) or \`write_file\`, then validate with terminal commands. Close with a short summary and \`suggest_followups\` when useful.`,
+  instructionsPrompt: `Read the user request, gather just enough context, plan with \`write_todos\` if the task has 3+ steps, edit with \`str_replace\` (preferred) or \`write_file\`, then validate with terminal commands. Close with a short summary and \`suggest_followups\` when useful.
+
+# Todo closure (mandatory before \`end_turn\`)
+
+If you used \`write_todos\` this turn, you MUST call \`write_todos\` one final time to mark every completed item done before \`end_turn\`. Rules:
+
+1. The final summary message IS the work for any "summarize / wrap up / write summary" todo — mark that todo complete as soon as you start writing the summary, in the same \`write_todos\` call that closes the rest of the list.
+2. Do not leave a todo unchecked if the work it describes is done. If you genuinely could not complete a todo, mark it cancelled with a one-line reason — never leave it open.
+3. The list must be fully resolved (every item complete or cancelled) before \`end_turn\`. \`end_turn\` with open todos is a bug.`,
 }
 
 export default definition

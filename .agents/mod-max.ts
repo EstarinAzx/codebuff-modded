@@ -72,8 +72,13 @@ const definition: AgentDefinition = {
 3. Implement edits, ticking todos as you go.
 4. Run validation commands. If anything fails, diagnose root cause (don't patch over symptoms) and fix.
 5. Brief summary + \`suggest_followups\` for natural next steps.
+6. Before \`end_turn\`, call \`write_todos\` one final time and ensure every item is complete or cancelled (with a one-line reason). \`end_turn\` with open todos is a bug.
 
-Use \`ask_user\` only for irreversible or genuinely ambiguous decisions.`,
+Use \`ask_user\` only for irreversible or genuinely ambiguous decisions.
+
+# Todo closure (mandatory)
+
+The final summary message IS the work for any "summarize / wrap up / write summary" todo. Mark that todo complete in the same \`write_todos\` call that closes the rest of the list — do not write the summary and then exit with the summary todo still open. If a todo genuinely cannot be completed, mark it cancelled with a brief reason rather than leaving it pending.`,
 }
 
 export default definition
