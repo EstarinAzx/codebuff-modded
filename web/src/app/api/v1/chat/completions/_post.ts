@@ -73,12 +73,11 @@ import {
   handleOpenCodeZenStream,
   isOpenCodeZenModel,
 } from '@/llm-api/opencode-zen'
+import { OpenCodeGoError } from '@/llm-api/opencode-go'
 import {
-  OpenCodeGoError,
-  handleOpenCodeGoNonStream,
-  handleOpenCodeGoStream,
-  isOpenCodeGoModel,
-} from '@/llm-api/opencode-go'
+  tryForkProviderNonStream,
+  tryForkProviderStream,
+} from '@/fork-impls/provider-dispatch'
 import {
   SiliconFlowError,
   handleSiliconFlowNonStream,
@@ -707,40 +706,6 @@ export async function postChatCompletions(params: {
     try {
       if (bodyStream) {
         // Streaming request — route supported models to direct providers.
-        const useSiliconFlow = false // isSiliconFlowModel(typedBody.model)
-        const useOpenCodeZen = isOpenCodeZenModel(typedBody.model)
-        const useOpenCodeGo =
-          !useOpenCodeZen && isOpenCodeGoModel(typedBody.model)
-        const useMoonshot =
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          isMoonshotModel(typedBody.model)
-        const useCanopyWave =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          isCanopyWaveModel(typedBody.model)
-        const useDeepSeek =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          !useCanopyWave &&
-          isDeepSeekModel(typedBody.model)
-        const useFireworks =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          !useCanopyWave &&
-          !useDeepSeek &&
-          isFireworksModel(typedBody.model)
-        const useOpenAIDirect =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          !useCanopyWave &&
-          !useDeepSeek &&
-          !useFireworks &&
-          isOpenAIDirectModel(typedBody.model)
         const baseArgs = {
           body: typedBody,
           userId,
@@ -750,14 +715,41 @@ export async function postChatCompletions(params: {
           logger: providerLogger,
           insertMessageBigquery,
         }
-        const stream = useSiliconFlow
-          ? await handleSiliconFlowStream(baseArgs)
-          : useMoonshot
-            ? await handleMoonshotStream(baseArgs)
-            : useOpenCodeZen
-              ? await handleOpenCodeZenStream(baseArgs)
-              : useOpenCodeGo
-                ? await handleOpenCodeGoStream(baseArgs)
+        const forkStream = await tryForkProviderStream(typedBody.model, baseArgs)
+        const useSiliconFlow = false // isSiliconFlowModel(typedBody.model)
+        const useOpenCodeZen = isOpenCodeZenModel(typedBody.model)
+        const useMoonshot =
+          !useOpenCodeZen && isMoonshotModel(typedBody.model)
+        const useCanopyWave =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          isCanopyWaveModel(typedBody.model)
+        const useDeepSeek =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useCanopyWave &&
+          isDeepSeekModel(typedBody.model)
+        const useFireworks =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useCanopyWave &&
+          !useDeepSeek &&
+          isFireworksModel(typedBody.model)
+        const useOpenAIDirect =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useCanopyWave &&
+          !useDeepSeek &&
+          !useFireworks &&
+          isOpenAIDirectModel(typedBody.model)
+        const stream =
+          forkStream ??
+          (useSiliconFlow
+            ? await handleSiliconFlowStream(baseArgs)
+            : useMoonshot
+              ? await handleMoonshotStream(baseArgs)
+              : useOpenCodeZen
+                ? await handleOpenCodeZenStream(baseArgs)
                 : useCanopyWave
                   ? await handleCanopyWaveStream(baseArgs)
                   : useDeepSeek
@@ -769,7 +761,7 @@ export async function postChatCompletions(params: {
                         : await handleOpenRouterStream({
                             ...baseArgs,
                             openrouterApiKey,
-                          })
+                          }))
 
         trackSuccessEvent({
           event: AnalyticsEvent.CHAT_COMPLETIONS_STREAM_STARTED,
@@ -792,38 +784,6 @@ export async function postChatCompletions(params: {
       } else {
         // Non-streaming request — route to direct providers for supported models
         const model = typedBody.model
-        const useSiliconFlow = false // isSiliconFlowModel(model)
-        const useOpenCodeZen = isOpenCodeZenModel(model)
-        const useOpenCodeGo = !useOpenCodeZen && isOpenCodeGoModel(model)
-        const useMoonshot =
-          !useOpenCodeZen && !useOpenCodeGo && isMoonshotModel(model)
-        const useCanopyWave =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          isCanopyWaveModel(model)
-        const useDeepSeek =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          !useCanopyWave &&
-          isDeepSeekModel(model)
-        const useFireworks =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          !useCanopyWave &&
-          !useDeepSeek &&
-          isFireworksModel(model)
-        const shouldUseOpenAIEndpoint =
-          !useMoonshot &&
-          !useOpenCodeZen &&
-          !useOpenCodeGo &&
-          !useCanopyWave &&
-          !useDeepSeek &&
-          !useFireworks &&
-          isOpenAIDirectModel(model)
-
         const baseArgs = {
           body: typedBody,
           userId,
@@ -833,27 +793,53 @@ export async function postChatCompletions(params: {
           logger: providerLogger,
           insertMessageBigquery,
         }
+        const forkResult = await tryForkProviderNonStream(model, baseArgs)
+        const useSiliconFlow = false // isSiliconFlowModel(model)
+        const useOpenCodeZen = isOpenCodeZenModel(model)
+        const useMoonshot =
+          !useOpenCodeZen && isMoonshotModel(model)
+        const useCanopyWave =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          isCanopyWaveModel(model)
+        const useDeepSeek =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useCanopyWave &&
+          isDeepSeekModel(model)
+        const useFireworks =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useCanopyWave &&
+          !useDeepSeek &&
+          isFireworksModel(model)
+        const shouldUseOpenAIEndpoint =
+          !useMoonshot &&
+          !useOpenCodeZen &&
+          !useCanopyWave &&
+          !useDeepSeek &&
+          !useFireworks &&
+          isOpenAIDirectModel(model)
+
         const nonStreamRequest = useSiliconFlow
           ? handleSiliconFlowNonStream(baseArgs)
           : useMoonshot
             ? handleMoonshotNonStream(baseArgs)
             : useOpenCodeZen
               ? handleOpenCodeZenNonStream(baseArgs)
-              : useOpenCodeGo
-                ? handleOpenCodeGoNonStream(baseArgs)
-                : useCanopyWave
-                  ? handleCanopyWaveNonStream(baseArgs)
-                  : useDeepSeek
-                    ? handleDeepSeekNonStream(baseArgs)
-                    : useFireworks
-                      ? handleFireworksNonStream(baseArgs)
-                      : shouldUseOpenAIEndpoint
-                        ? handleOpenAINonStream(baseArgs)
-                        : handleOpenRouterNonStream({
-                            ...baseArgs,
-                            openrouterApiKey,
-                          })
-        const result = await nonStreamRequest
+              : useCanopyWave
+                ? handleCanopyWaveNonStream(baseArgs)
+                : useDeepSeek
+                  ? handleDeepSeekNonStream(baseArgs)
+                  : useFireworks
+                    ? handleFireworksNonStream(baseArgs)
+                    : shouldUseOpenAIEndpoint
+                      ? handleOpenAINonStream(baseArgs)
+                      : handleOpenRouterNonStream({
+                          ...baseArgs,
+                          openrouterApiKey,
+                        })
+        const result = forkResult ?? (await nonStreamRequest)
 
         trackSuccessEvent({
           event: AnalyticsEvent.CHAT_COMPLETIONS_GENERATION_STARTED,
