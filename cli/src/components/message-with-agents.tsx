@@ -21,7 +21,6 @@ import {
   hasMarkdown,
   type MarkdownPalette,
 } from '../utils/markdown-renderer'
-import { BORDER_CHARS } from '../utils/ui-constants'
 
 import type { ChatMessage } from '../types/chat'
 import type { FeedbackCategory } from '@codebuff/common/constants/feedback'
@@ -252,8 +251,6 @@ export const MessageWithAgents = memo(
       />
     )
 
-    const aiBorderColor = theme?.secondary ?? theme?.aiLine ?? 'white'
-
     return (
       <box
         key={message.id}
@@ -289,16 +286,6 @@ export const MessageWithAgents = memo(
                 }}
               />
               <box style={contentBoxStyle}>{messageBlockEl}</box>
-            </box>
-          ) : isAi ? (
-            <box
-              border
-              borderStyle="single"
-              borderColor={aiBorderColor}
-              customBorderChars={BORDER_CHARS}
-              style={contentBoxStyle}
-            >
-              {messageBlockEl}
             </box>
           ) : (
             <box style={contentBoxStyle}>{messageBlockEl}</box>

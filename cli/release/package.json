@@ -1,6 +1,6 @@
 {
   "name": "codebuff-mod",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "BYOK fork of the Codebuff CLI. Bring your own provider key (OpenAI, Anthropic, OpenRouter, OpenCode Zen/Go, custom OpenAI-compat). No codebuff.com account required.",
   "license": "MIT",
   "bin": {
