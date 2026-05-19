@@ -34,9 +34,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EstarinAzx/codebuff.git"
+    "url": "git+https://github.com/EstarinAzx/codebuff-modded.git"
   },
-  "homepage": "https://github.com/EstarinAzx/codebuff#readme",
+  "homepage": "https://github.com/EstarinAzx/codebuff-modded#readme",
   "publishConfig": {
     "access": "public"
   }

@@ -13,11 +13,12 @@ const { createReleaseHttpClient } = require('./http')
 
 const packageName = 'codebuff-mod'
 
-// BYOK fork: binary artifacts ship via GitHub Releases of EstarinAzx/codebuff
-// instead of upstream codebuff.com /api/releases/download. End users only
-// need `npm install -g codebuff-mod` — launcher fetches the right platform
-// binary on first run.
-const RELEASE_REPO = 'EstarinAzx/codebuff'
+// BYOK fork: binary artifacts ship via GitHub Releases of
+// EstarinAzx/codebuff-modded (renamed from EstarinAzx/codebuff between 1.0.1
+// and 1.0.2) instead of upstream codebuff.com /api/releases/download. End
+// users only need `npm install -g codebuff-mod` — launcher fetches the right
+// platform binary on first run.
+const RELEASE_REPO = 'EstarinAzx/codebuff-modded'
 
 /**
  * Terminal escape sequences to reset terminal state after the child process exits.
@@ -295,8 +296,9 @@ async function downloadBinary(version) {
     throw error
   }
 
-  // Fork: download from GitHub Releases of EstarinAzx/codebuff. CODEBUFF_MOD_RELEASE_URL
-  // overrides for testing (point at a local file:// or different repo).
+  // Fork: download from GitHub Releases of EstarinAzx/codebuff-modded.
+  // CODEBUFF_MOD_RELEASE_URL overrides for testing (point at a local file://
+  // or different repo).
   const downloadUrl =
     process.env.CODEBUFF_MOD_RELEASE_URL ||
     `https://github.com/${RELEASE_REPO}/releases/download/v${version}/${fileName}`
