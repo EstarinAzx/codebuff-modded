@@ -90,8 +90,10 @@ export interface ChatTheme {
 
   /** Border color for the AI's final-prose panel. Distinct from sub-agent
    *  borders (theme.secondary) so the assistant's textual reply visibly
-   *  stands apart from spawned-agent groups. */
-  aiPanelBorder: string
+   *  stands apart from spawned-agent groups. Optional — message-block.tsx
+   *  falls back through `theme.secondary ?? theme.aiLine ?? theme.foreground`
+   *  so upstream themes that don't carry this field still render correctly. */
+  aiPanelBorder?: string
 
   // Agent backgrounds (specific states that don't map to semantics)
   /** Agent toggle header background */
