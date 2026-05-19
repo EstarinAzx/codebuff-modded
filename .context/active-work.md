@@ -3,60 +3,72 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
 tags: [context, active-work]
-ship: 1.0.3 (shipped — shim refactor)
+ship: 1.0.4 (shipped — todo-closure enforcement)
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7 (auto)_
-_At commit: `modded` tip `f9798607d` (MERGE-STRATEGY refresh on top of v1.0.3)_
+_At commit: `modded` tip `0395ffbc3` (v1.0.4 release commit, tag pinned)_
 
 ## Current focus
 
-Nothing in flight. Just shipped v1.0.3 — shim-refactor release.
-Behavior identical to 1.0.2; refactor cuts upstream-merge friction by
-~15% LOC in modified files (empirical, vs `upstream/main`). Three
-platform tarballs on GitHub Releases + launcher live on npm. Docs
-synced (active-work + MERGE-STRATEGY). Pre-shim rollback anchored at
-branch `modded-pre-shim` + tag `v1.0.2-pre-shim`.
+Nothing in flight. Just shipped v1.0.4 — template-only patch enforcing
+todo closure before `end_turn` in mod-default + mod-max. Three platform
+tarballs on GitHub Releases + launcher live on npm. No SDK / agent-runtime
+/ hook changes — pre-shim binary completely unaffected.
 
 ## State
 
 - **In flight:** nothing.
-- **Recently shipped — v1.0.3 (tag commit `e2e3efa18`):**
-  - Refactored ~30 in-place fork edits to one-line hook dispatches via
-    new `sdk/src/impl/fork-hooks.ts` registry + `*/fork-impls/`
-    implementation dirs.
+- **Recently shipped — v1.0.4 (tag commit `0395ffbc3`):**
+  - Added "Todo closure (mandatory before `end_turn`)" block to
+    `instructionsPrompt` in `.agents/mod-default.ts` + `.agents/mod-max.ts`.
+    Forces a final `write_todos` call resolving every item to
+    complete/cancelled before `end_turn`. Closes the recurring papercut
+    where the final summary todo stayed unchecked because the model
+    treated the summary message itself as completion.
+  - Template-only — zero changes to SDK, agent-runtime, hooks, or
+    shim infrastructure. Pre-shim binary behavior identical.
+  - Three platform tarballs at https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.0.4
+  - npm: `codebuff-mod@1.0.4` live on registry (sha
+    `63a98948224c68011c85baab32cc906e79b9e22a`).
+- **Previously shipped — v1.0.3 (tag commit `e2e3efa18`):**
+  - Hook-registry shim refactor: ~30 in-place fork edits → one-line
+    `getForkHooks().<name>?.(...)` dispatches. Logic moved to
+    `*/fork-impls/` dirs; registry at `sdk/src/impl/fork-hooks.ts`.
   - 8 of 9 file-family shims landed; #5–7 (React hooks `BYOK_AT_BOOT`)
-    reverted — bun-compile tree-shook the fork-hook registration even
-    after `sideEffects` allowlist + `pre-init/` placement.
-  - Empirical conflict surface vs `upstream/main`: 1393 → 1177 lines
-    in modified files (~15% reduction). Modified-file count flat
-    (40 → 41 — one extra file because of fork-impls registration
-    plumbing in `init-app.ts` + `sdk/src/index.ts`).
-  - Three platform tarballs at https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.0.3
-  - npm: `codebuff-mod@1.0.3` live on registry.
+    reverted — bun-compile tree-shook the fork-hook registration.
+  - Conflict surface vs `upstream/main`: 1393 → 1177 lines (~15% cut).
 - **Branch state:**
-  - `modded` → `f9798607d` (release tip + docs)
+  - `modded` → `0395ffbc3` (v1.0.4 release tip)
   - `modded-pre-shim` → `6048b92ba` (v1.0.2 anchor, archive)
   - Tag `v1.0.2-pre-shim` pins `6048b92ba` independently.
-  - Tag `v1.0.3` pins the release commit `e2e3efa18`.
+  - Tag `v1.0.3` pins shim refactor release `e2e3efa18`.
+  - Tag `v1.0.4` pins template-patch release `0395ffbc3`.
   - `upstream` remote configured against `CodebuffAI/codebuff`.
 - **Binaries:**
-  - `cli/bin/codebuff-mod.exe` → v1.0.3 shim build
+  - `cli/bin/codebuff-mod.exe` → v1.0.4 build (todo-closure patch)
   - `cli/bin/codebuff-mod.pre-shim.exe` → v1.0.2 rollback
 - **Blocked:** none.
-- **Typecheck at ship:** clean across all packages.
-- **Test status:** modded baseline preserved (14 pre-existing failures
-  unchanged; 19 BYOK tests green).
-- **Smoke result:** passed per user — codex OAuth, `/providers:bind`
-  spawn, raw-key Path C, banner art, `/logout` BYOK short-circuit.
+- **Typecheck at ship:** not re-run for v1.0.4 (template-only change,
+  no TS surface touched). Last green run was v1.0.3 ship.
+- **Test status:** modded baseline preserved from v1.0.3 (14 pre-existing
+  failures unchanged; 19 BYOK tests green). No new tests for v1.0.4 —
+  prompt-only change, validated empirically by user.
+- **Smoke result for v1.0.4:** pending — patch addresses a user-reported
+  UX bug (todo "Summarize" left unchecked after `linelens` task).
+  Validate by re-running the `wordfreq` / `linelens` style multi-todo
+  prompt on v1.0.4 and confirming the final list closes cleanly.
 - **Working tree:** clean.
 
 ## Pick up here
 
 No active task. If next upstream merge produces >20 conflicting files,
-revisit deferred work below.
+revisit deferred work below. If v1.0.4 smoke shows todo-closure still
+fails, consider strengthening the patch further (e.g. agent-runtime-side
+auto-close on `end_turn` instead of relying on prompt compliance — out
+of scope for v1.0.4 but tractable).
 
 ## Deferred — chase only if real merge pain returns
 

@@ -9,6 +9,18 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-19 — Enforce todo closure via mod-* `instructionsPrompt` (1.0.4)
+
+**Decision:** Add an explicit "Todo closure (mandatory before `end_turn`)" block to the `instructionsPrompt` of `.agents/mod-default.ts` and `.agents/mod-max.ts`. The block instructs the agent that (a) every item in `write_todos` must be resolved (complete or cancelled with a one-line reason) before calling `end_turn`, (b) the final summary message IS the work for any "summarize / wrap up" todo and must be marked complete in the same `write_todos` call that closes the rest of the list, and (c) `end_turn` with open todos is a bug.
+
+**Why:** A recurring UX papercut — across multiple unrelated tasks (README writing, `linelens` CLI build, etc.) the agent would finish all real work, write its final summary message, then call `end_turn` with the "Summarize changes" todo still pending. User had to manually re-prompt "finish the last todo" each time. Root cause is model behavior: the agent treats the act of writing the summary as completion, never re-emits a `write_todos` call to flip the box. Three alternatives considered: (a) widen the prompt to enforce closure — picked, smallest blast radius, zero code changes; (b) hook into `end_turn` server-side and auto-mark every open todo complete — rejected as overreach (would also close todos the agent legitimately abandoned without acknowledging); (c) ship a `set_messages`-on-`end_turn` lifecycle assertion in `packages/agent-runtime/` — rejected as architectural change for a UX issue, plus it would touch agent-runtime which the shim refactor deliberately left untouched.
+
+The patch is template-only — zero changes to SDK, agent-runtime, hooks, or shim infrastructure. Pre-shim binary behavior is identical. mod-lite and mod-plan deliberately left alone — they don't use `write_todos` at the same frequency and adding boilerplate would dilute their lighter-weight contracts.
+
+**Trade-off accepted:** Prompt-only enforcement is best-effort, not guaranteed. The model may still skip a todo if it deeply misreads the request. If repros persist after 1.0.4, escalate to agent-runtime-side auto-close (option c above). Slight `instructionsPrompt` bloat — mod-default went from 1-sentence to ~12 lines, mod-max gained one numbered step + a closing paragraph. Acceptable: instructions are pure tokens-in, not surface area for upstream merge conflicts.
+
+**Reversibility:** trivial. Revert the two `.agents/mod-*.ts` files, re-run `bun run scripts/prebuild-agents.ts`, rebuild `cli/bin/codebuff-mod.exe`. Pre-shim binary already lacks the patch (todo-closure regression preserved as a control case if needed for future debugging).
+
 ## 2026-05-19 — Hook-registry shim refactor (1.0.3)
 
 **Decision:** Convert ~30 scattered in-place fork edits across upstream files into one-line dispatch calls through a hook registry at `sdk/src/impl/fork-hooks.ts`. Fork-local logic moves into `*/fork-impls/` directories. Upstream files retain a single `getForkHooks().<name>?.(...)` call at the equivalent spot; multi-line BYOK logic lives in fork-impls. Hook registration happens at boot from `cli/src/init/init-app.ts` (CLI) and via explicit `registerXxxHooks()` calls within `byok-resolver.ts` (SDK).
