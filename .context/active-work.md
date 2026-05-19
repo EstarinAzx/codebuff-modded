@@ -3,77 +3,88 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
 tags: [context, active-work]
-ship: shim-shipped (modded tip = 495258086, pre-shim archived at v1.0.2-pre-shim)
+ship: 1.0.3 (shipped — shim refactor)
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7 (auto)_
-_At commit: `modded` tip `495258086` (shim-shipped, smoke green)_
+_At commit: `modded` tip `f9798607d` (MERGE-STRATEGY refresh on top of v1.0.3)_
 
 ## Current focus
 
-Nothing in flight. Shim refactor shipped — `modded` now points at the
-previously-`modded-shim` tip. Old `modded` archived as `modded-pre-shim`
-+ tagged `v1.0.2-pre-shim` for rollback. Smoke passed.
+Nothing in flight. Just shipped v1.0.3 — shim-refactor release.
+Behavior identical to 1.0.2; refactor cuts upstream-merge friction by
+~15% LOC in modified files (empirical, vs `upstream/main`). Three
+platform tarballs on GitHub Releases + launcher live on npm. Docs
+synced (active-work + MERGE-STRATEGY). Pre-shim rollback anchored at
+branch `modded-pre-shim` + tag `v1.0.2-pre-shim`.
 
 ## State
 
 - **In flight:** nothing.
-- **Recently shipped — shim swap (modded → 495258086):**
-  Replaced the in-place fork edits across ~30 upstream files with hook
-  dispatches into a fork-impls registry. 8 of 9 file-family shims
-  shipped (#5-7 React hooks reverted due to bun-compile tree-shaking).
-  Empirical conflict surface vs `upstream/main`: 1393 → 1177 lines
-  edited (~15% reduction). Modified-file count flat (40 → 41). Plan
-  target of 70% drop missed; deferred work tracked below.
+- **Recently shipped — v1.0.3 (tag commit `e2e3efa18`):**
+  - Refactored ~30 in-place fork edits to one-line hook dispatches via
+    new `sdk/src/impl/fork-hooks.ts` registry + `*/fork-impls/`
+    implementation dirs.
+  - 8 of 9 file-family shims landed; #5–7 (React hooks `BYOK_AT_BOOT`)
+    reverted — bun-compile tree-shook the fork-hook registration even
+    after `sideEffects` allowlist + `pre-init/` placement.
+  - Empirical conflict surface vs `upstream/main`: 1393 → 1177 lines
+    in modified files (~15% reduction). Modified-file count flat
+    (40 → 41 — one extra file because of fork-impls registration
+    plumbing in `init-app.ts` + `sdk/src/index.ts`).
+  - Three platform tarballs at https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.0.3
+  - npm: `codebuff-mod@1.0.3` live on registry.
 - **Branch state:**
-  - `modded` → `495258086` (ships next release)
-  - `modded-pre-shim` → `6048b92ba` (1.0.2 ship anchor, never deleted)
-  - tag `v1.0.2-pre-shim` → same commit (rollback marker)
-  - Remote synced: force-pushed `modded`, archive branch + tag pushed.
+  - `modded` → `f9798607d` (release tip + docs)
+  - `modded-pre-shim` → `6048b92ba` (v1.0.2 anchor, archive)
+  - Tag `v1.0.2-pre-shim` pins `6048b92ba` independently.
+  - Tag `v1.0.3` pins the release commit `e2e3efa18`.
+  - `upstream` remote configured against `CodebuffAI/codebuff`.
 - **Binaries:**
-  - `cli/bin/codebuff-mod.exe` → shim binary (current)
-  - `cli/bin/codebuff-mod.pre-shim.exe` → rollback binary
+  - `cli/bin/codebuff-mod.exe` → v1.0.3 shim build
+  - `cli/bin/codebuff-mod.pre-shim.exe` → v1.0.2 rollback
 - **Blocked:** none.
-- **Typecheck at shim ship:** clean across all packages.
+- **Typecheck at ship:** clean across all packages.
 - **Test status:** modded baseline preserved (14 pre-existing failures
-  unchanged). 19 BYOK tests green (model-provider-byok +
-  database-byok-skip + database).
+  unchanged; 19 BYOK tests green).
 - **Smoke result:** passed per user — codex OAuth, `/providers:bind`
-  agent spawn, raw-key Path C, banner art, `/logout` BYOK short-circuit.
+  spawn, raw-key Path C, banner art, `/logout` BYOK short-circuit.
 - **Working tree:** clean.
 
 ## Pick up here
 
-No active task. If next upstream merge is genuinely painful (>20
-conflicting files), revisit deferred shim work below.
+No active task. If next upstream merge produces >20 conflicting files,
+revisit deferred work below.
 
-## Deferred (only chase if real merge pain returns)
+## Deferred — chase only if real merge pain returns
 
 - **Heavy-file deeper shims.** Three files still hold large in-place
   edits and could shim further if upstream starts touching them:
-  - `cli/src/commands/command-registry.ts` (176+ lines added —
-    codex preset wiring beyond just the dispatch shim)
+  - `cli/src/commands/command-registry.ts` (176+ lines — codex
+    preset wiring + `/logout` BYOK branch beyond just the dispatch
+    shim)
   - `cli/src/components/message-block.tsx` (164+ lines —
     aiPanelBorder rendering logic, not just the resolver)
   - `web/src/app/api/v1/chat/completions/_post.ts` (80+/54- —
-    opencode-go ladder still inline-edited despite hook)
-- **bun-compile tree-shaking repro.** Why does bun's `--compile` mode
+    opencode-go ladder still inline despite override hook)
+- **bun-compile tree-shake repro.** Why does bun's `--compile` mode
   drop side-effect hook registrations even with `sideEffects`
-  allowlist + `pre-init/` placement? If repro found + fixed, shims
-  #5-7 (3 React hooks) ship and the refactor delivers closer to plan.
+  allowlist + `pre-init/` placement? If a minimal repro lands a fix,
+  shims #5–7 (3 React hooks) can ship and the refactor delivers
+  closer to plan.
 - **`ForkHooks.shouldSkipReactHook` dead field.** Registry exposes
-  the slot but no caller uses it after the #5-7 revert. Harmless to
+  the slot but no caller uses it after the #5–7 revert. Harmless to
   leave; ~10 lines to remove.
 - **`byok-resolver.ts` style asymmetry.** SDK uses explicit
-  `registerXxxHooks()`; CLI uses inline IIFE. Stylistic only, not
-  broken.
+  `registerXxxHooks()`; CLI uses inline IIFE in `init-app.ts`.
+  Stylistic only, not broken.
 
 ## Open questions (carry-over)
 
-- **`codexspark` / `codexplan` aliases unverified for OAuth-bearer path.**
-  Included in 1.0.1 with caveat. One-line revert in
+- **`codexspark` / `codexplan` aliases unverified for OAuth-bearer
+  path.** Included in 1.0.1 with caveat. One-line revert in
   `OPENROUTER_TO_OPENAI_MODEL_MAP` if either 4xx's on first real use.
 - **Token refresh ergonomics** — `getValidCodexCredentials` refreshes
   on demand within Path C dispatch, but a refresh failure mid-conversation
@@ -84,15 +95,16 @@ conflicting files), revisit deferred shim work below.
   Retire singleton in a future minor?
 - **macOS x64 + arm64 binaries** — still deferred. Ships only
   win32-x64, linux-x64, linux-arm64.
-- **Phase 3b/c OpenTUI providers panel** — text-mode covers full surface;
-  visual wizard still nice-to-have.
-- **Hard-delete `web/` and `freebuff/`** once shim stays stable. Path B
-  is gated behind `CODEBUFF_USE_BACKEND=1` with zero known consumers.
+- **Phase 3b/c OpenTUI providers panel** — text-mode covers full
+  surface; visual wizard still nice-to-have.
+- **Hard-delete `web/` and `freebuff/`** once shim stays stable.
+  Path B is gated behind `CODEBUFF_USE_BACKEND=1` with zero known
+  consumers.
 - **Delete `LoginModal` + `cli/src/login/*`** — provably unreachable
   post-0.1.10 since `app.tsx` gates on env.
-- **Origin remote URL stale** — `origin` still points at
-  `EstarinAzx/codebuff` historically; now resolves to `codebuff-modded`.
-  GitHub redirects; pushes emit a "repository moved" notice.
+- **Origin remote URL stale** — `origin` already points at
+  `EstarinAzx/codebuff-modded.git` as of this session's push.
+  Confirmed via `git remote -v`.
 
 ## Security carry-over
 
@@ -101,7 +113,8 @@ conflicting files), revisit deferred shim work below.
   `~/.config/manicode/message-history.json`. User declined a scrub.
 - `~/.config/manicode/codex-oauth.json` (added 0.2.1) follows 0600
   posture matching `providers.json` and `credentials.json`. Tokens
-  stored in plaintext; same threat model as the singleton it sits beside.
+  stored in plaintext; same threat model as the singleton it sits
+  beside.
 - Pre-shim swap backup: `~/.config/manicode/providers.json.shim-bak`.
 
 ## Rollback path (if shim turns sour later)
@@ -124,22 +137,6 @@ is reversible even if the archive branch is later deleted.
 - `/to-issues` — if macOS binaries / web+freebuff deletion / login
   dead-code removal get turned into trackable tickets.
 - `/grill-me` — if scoping any of the deferred items.
-
-## Recent context
-
-- Shim refactor (was `modded-shim` branch) merged into `modded` via
-  rename swap. Old `modded` archived as `modded-pre-shim` + tagged
-  `v1.0.2-pre-shim`. Force-pushed origin/modded to new tip after smoke.
-- Empirical conflict-surface measurement vs `upstream/main` showed
-  ~15% LOC reduction in modified files (1393 → 1177), modified-file
-  count flat (40 → 41). Below plan target of 70%, mostly because
-  shims #5-7 (React hooks) were reverted due to bun-compile
-  tree-shaking dropping the fork-hook registration in the compiled
-  binary even after sideEffects allowlist + pre-init/ placement.
-- 31 added files in fork-impls/ dirs are zero-conflict by design.
-- Modded-shim worktree dir at `D:\.claude\claude projects\modded-shim\`
-  was project-context tracking for the refactor itself, not a separate
-  checkout. Can be deleted; the actual code lives on `modded` now.
 
 ## Related
 

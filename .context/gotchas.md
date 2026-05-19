@@ -2,7 +2,7 @@
 type: gotchas
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
-tags: [gotchas]
+tags: [gotchas, shim]
 ---
 
 # Gotchas
@@ -91,3 +91,28 @@ If you ever need to manually unlock an older binary (pre-0.1.10), hand-write `~/
 ## `.context/active-work.md` rolling state — past sessions are gone
 
 The handoff file is rewritten from scratch each `/context-update`. The git log + the in-tree plan doc at `.claude/byok-rip-implementation-plan.md` are the only persistent record of how we got from upstream codebuff to standalone BYOK. Don't put session history in active-work.md; it belongs in commits.
+
+## Fork-hook registration silently no-ops if tree-shaken
+
+The 1.0.3 shim refactor put fork-local logic behind `getForkHooks().<name>?.(...)` calls. If the boot registration (`registerForkHooks({...})` in `cli/src/init/init-app.ts`, or the SDK-side IIFEs in `sdk/src/impl/fork-impls/byok-resolver.ts`) is dropped at bundle time, the hook returns `undefined` and upstream fallthrough behavior runs verbatim. This is silent — no error, no log line. The CLI just acts like the fork isn't there.
+
+bun's `--compile` (production) bit shims #5–7 specifically: even with `sideEffects` allowlists on `cli/package.json` + `sdk/package.json` AND moving the impl under `cli/src/pre-init/` (which has its own sideEffects entry), the side-effect-only import was elided in the compiled binary. Symptom: banner + `/providers:*` work but "connecting…" sticks because the three React hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) re-acquired their pre-shim BYOK_AT_BOOT logic — which is fine — but the hook-routed equivalents would have failed in production.
+
+The 1.0.3 mitigation: SDK fork-impls use **explicit** `registerXxxHooks()` exports called from a barrel module (`byok-resolver.ts` itself), not side-effect imports. CLI uses inline IIFE in `init-app.ts`. The asymmetric pattern is deliberate — explicit-register survives tree-shaking; side-effect-only imports don't.
+
+If you add a new fork-hook and the binary acts like it isn't there, suspect this first: open the compiled bundle (`bun build --no-compile` for a peek) and grep for your `registerForkHooks` call. If missing, switch from side-effect import to explicit call.
+
+## Build script does NOT auto-tar; release tarballs are manual
+
+`cli/scripts/build-binary.ts` writes one binary to `cli/bin/` per invocation (e.g. `codebuff-mod.exe` for win32 or `codebuff-mod` for linux). It does NOT package into `dist-binaries/*.tar.gz`. Tarballs must be created manually before `gh release create`:
+
+```powershell
+$bin = "D:\.claude\claude projects\codebuff\cli\bin"
+$dist = "D:\.claude\claude projects\codebuff\cli\dist-binaries"
+cd $bin
+tar -czf "$dist\codebuff-mod-win32-x64.tar.gz" codebuff-mod.exe
+# For linux: rebuild between tar calls because cli/bin/codebuff-mod
+# is overwritten each cross-compile run.
+```
+
+Cross-compile order matters: each `OVERRIDE_TARGET=bun-linux-*` build overwrites `cli/bin/codebuff-mod`. Tar each before kicking off the next. Win32 is safe because the output filename is `.exe` and doesn't collide.

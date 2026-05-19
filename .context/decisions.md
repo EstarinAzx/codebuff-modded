@@ -9,6 +9,16 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-19 — Hook-registry shim refactor (1.0.3)
+
+**Decision:** Convert ~30 scattered in-place fork edits across upstream files into one-line dispatch calls through a hook registry at `sdk/src/impl/fork-hooks.ts`. Fork-local logic moves into `*/fork-impls/` directories. Upstream files retain a single `getForkHooks().<name>?.(...)` call at the equivalent spot; multi-line BYOK logic lives in fork-impls. Hook registration happens at boot from `cli/src/init/init-app.ts` (CLI) and via explicit `registerXxxHooks()` calls within `byok-resolver.ts` (SDK).
+
+**Why:** Upstream merge friction was the binding constraint. ~30 in-place edits meant every `git merge upstream/main` was an afternoon of conflict resolution. Three alternatives considered: (a) pure rebuild from `upstream/main` re-implementing each change — rejected as expensive replay with no architectural win; (b) overlay-as-package consuming upstream as npm dependency — rejected as multi-week rewrite blocked on upstream cooperation; (c) thin-shim each in-place edit to a one-line hook — picked. Cheapest path that reduces conflicts without dropping features.
+
+**Trade-off accepted:** Plan target was ~70% LOC reduction in modified files; actual delivered ~15% (1393 → 1177 lines vs `upstream/main`). Modified-file count flat (40 → 41). Three causes: (1) React hooks #5–7 reverted because bun-compile tree-shook the hook registration — see [[gotchas]] "Fork-hook registration silently no-ops if tree-shaken"; (2) heavy files (`command-registry.ts`, `message-block.tsx`, `_post.ts`) couldn't fully shim — codex preset wiring, theme rendering, opencode-go dispatch all touch upstream control flow in ways resistant to single-line extraction; (3) new shim infra added lines (`init-app.ts` boot registration, `sdk/src/index.ts` exports). 31 new files in `fork-impls/` dirs are zero-conflict by design. Real merge cost depends on which upstream files churn, not LOC totals.
+
+**Reversibility:** Easy. Branch `modded-pre-shim` + tag `v1.0.2-pre-shim` permanently anchor the pre-shim shape. Rollback path documented in `.context/active-work.md` §Rollback. Pre-shim binary preserved at `cli/bin/codebuff-mod.pre-shim.exe`.
+
 ## 2026-05-19 — `OPENROUTER_TO_OPENAI_MODEL_MAP` is the single source of truth for OAuth allowlist + codex picker (1.0.0)
 
 **Decision:** The map literal at `common/src/constants/chatgpt-oauth.ts` is the *only* place codex-routable model ids are listed. `Object.keys(map)` feeds both `isChatGptOAuthModelAllowed` (the non-BYOK global OAuth allowlist) and `MODEL_CATALOG.codex` in `cli/src/utils/providers-models.ts` (the picker catalog shown to users on codex profiles). Adding or removing an id is a one-line change that propagates to both surfaces automatically. The codex picker now flows through the same `getModelsForPreset` orchestrator every other preset uses — no codex-specific branch in `handleModelCommand`.
