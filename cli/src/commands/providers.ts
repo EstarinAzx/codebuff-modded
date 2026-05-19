@@ -32,8 +32,7 @@ import {
 } from '../utils/providers'
 import {
   clearCachedModels,
-  fetchModelsFromEndpoint,
-  fetchCodexModelsFromEndpoint,
+  getModelsForPreset,
 } from '../utils/providers-models'
 
 import type { RouterParams } from './command-registry'
@@ -391,36 +390,34 @@ export async function handleModelCommand(args: string): Promise<string> {
   if (!profile) return 'No active profile. Add one with /providers:add.'
   const target = args.trim()
   if (!target) {
-    // List candidates via live probe so user sees available options.
-    // Codex profiles use OAuth bearer + ChatGPT backend endpoint; everything
-    // else uses the apiKey + provider base URL.
+    // Unified path: catalog presets (incl. codex) short-circuit before any
+    // network I/O; live-probe presets (openrouter/together/groq) still hit
+    // the cache-then-probe flow; custom-openai returns the freetext source.
     try {
-      const models =
-        profile.preset === 'codex'
-          ? await fetchCodexModelsFromEndpoint({
-              oauthProfileId: profile.oauthProfileId ?? profile.id,
-            })
-          : await fetchModelsFromEndpoint({
-              baseUrl: profile.baseUrl,
-              apiKey: profile.apiKey,
-            })
+      const { source, models } = await getModelsForPreset({
+        preset: profile.preset,
+        baseUrl: profile.baseUrl,
+        apiKey: profile.apiKey,
+      })
       const head = models.slice(0, 20)
       const tail = models.length > 20 ? `\n  …(${models.length - 20} more)` : ''
-      const probeSrc =
-        profile.preset === 'codex'
-          ? 'ChatGPT backend /models'
-          : `${profile.baseUrl}/models`
+      const sourceLabel = {
+        catalog: 'curated catalog',
+        probe: `live ${profile.baseUrl}/models`,
+        cache: `cached ${profile.baseUrl}/models`,
+        freetext: 'free-text (no list available)',
+      }[source]
       return [
         `Current model: ${profile.model || '<unset>'}`,
         '',
-        `Available (live probe ${probeSrc}):`,
+        `Available (${sourceLabel}):`,
         ...head.map((m) => `  ${m}`),
       ].join('\n') + tail + '\n\nSwap: /model <id>'
     } catch (err) {
       return [
         `Current model: ${profile.model || '<unset>'}`,
         '',
-        `Could not probe /models: ${err instanceof Error ? err.message : String(err)}`,
+        `Could not list models: ${err instanceof Error ? err.message : String(err)}`,
         'Swap directly: /model <id>',
       ].join('\n')
     }

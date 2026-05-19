@@ -15,9 +15,9 @@ Removing a codex profile via `/providers:remove` calls `clearCodexCredentials(pr
 
 If a future migration wants multi-profile-shared OAuth, the `oauthProfileId` field is the seam: it defaults to `profile.id` at add-time but is stored explicitly so two profiles could point at the same credentials key. Today nothing exercises that fork.
 
-## Codex `/model` may not list anything
+## Codex `/model` ships a fixed catalog
 
-`/model` on a codex profile probes `https://chatgpt.com/backend-api/models` with the OAuth bearer. Codex CLI itself ships with a fixed model catalog, so this endpoint may permanently 404. Per 0.2.1 design call there is NO hardcoded fallback list — on probe failure the command prints "Swap directly: /model <id>" and the user can still set any allowlisted id manually (see `OPENROUTER_TO_OPENAI_MODEL_MAP` in `common/src/constants/chatgpt-oauth.ts` for the canonical set). If the endpoint stays dead in practice, revisit the no-fallback choice in a future minor.
+`/model` on a codex profile lists `Object.keys(OPENROUTER_TO_OPENAI_MODEL_MAP)` straight from the catalog — no network probe. The OAuth bearer cannot list models against `chatgpt.com/backend-api/models` (no such route is exposed to that token); Codex CLI itself ships a fixed catalog baked into the binary for the same reason. If you add an id to `OPENROUTER_TO_OPENAI_MODEL_MAP` in `common/src/constants/chatgpt-oauth.ts`, it automatically appears in `/model` listings — no second edit needed. 1.0.0 reverted the 0.2.1 live-probe attempt after the endpoint was confirmed dead.
 
 ## LLM provider dispatch is a chained ternary
 
