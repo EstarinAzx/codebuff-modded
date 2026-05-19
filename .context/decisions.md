@@ -9,6 +9,18 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-19 — `OPENROUTER_TO_OPENAI_MODEL_MAP` is the single source of truth for OAuth allowlist + codex picker (1.0.0)
+
+**Decision:** The map literal at `common/src/constants/chatgpt-oauth.ts` is the *only* place codex-routable model ids are listed. `Object.keys(map)` feeds both `isChatGptOAuthModelAllowed` (the non-BYOK global OAuth allowlist) and `MODEL_CATALOG.codex` in `cli/src/utils/providers-models.ts` (the picker catalog shown to users on codex profiles). Adding or removing an id is a one-line change that propagates to both surfaces automatically. The codex picker now flows through the same `getModelsForPreset` orchestrator every other preset uses — no codex-specific branch in `handleModelCommand`.
+
+**Why:** 0.2.1 originally tried to live-probe `https://chatgpt.com/backend-api/models` with the per-profile OAuth bearer. That endpoint does not exist for OAuth-bearer tokens — Codex CLI itself ships a fixed catalog baked into its binary for the same reason. Two alternatives considered: (a) maintain two separate lists, one for routing and one for the picker — rejected, guaranteed drift; (b) keep the probe and live with the "Could not probe /models" error in `/model` output — rejected, blind user UX. Picked (c): derive the picker from the allowlist. The fork already had the allowlist; reusing it for the picker is additive and zero-cost. Backward-safe because the catalog branch in `getModelsForPreset` already existed for `openai`, `anthropic`, etc. — codex just rejoined that branch.
+
+The "newest first" ordering (GPT-5.5 → GPT-4o-mini, codex-CLI aliases last) is intentional: `Object.keys()` insertion order = picker display order, so users see the strongest reasoning models without scrolling. Reorderable freely; no functional impact.
+
+**Trade-off accepted:** Picker only shows ids the fork has explicitly added. New OpenAI ids that route correctly against `chatgpt.com/backend-api/codex/responses` but are not in the map are invisible until someone updates the literal. Acceptable: same constraint Codex CLI lives under, and the single-source-of-truth invariant is worth more than auto-discovery.
+
+**Reversibility:** easy. To restore the live probe, restore `fetchCodexModelsFromEndpoint` (the deleted function — see git history of `cli/src/utils/providers-models.ts` at 1.0.0 commit `9c027af8e`) and the codex ternary in `handleModelCommand`. Not recommended; the endpoint stays dead.
+
 ## 2026-05-19 — Codex OAuth as a BYOK preset with per-profile token storage (0.2.1)
 
 **Decision:** Introduce a `codex` preset (`requiresApiKey: false`) that runs the existing Codex-compatible ChatGPT OAuth PKCE flow when added via `/providers:add codex [name]`, persists tokens to a NEW per-profile-keyed file `~/.config/manicode/codex-oauth.json` (separate from the legacy `credentials.json#chatgptOAuth` singleton), and sits in `providers.json` as a normal profile with empty `apiKey` plus a new optional `oauthProfileId` discriminator. SDK Path C in `model-provider.ts` branches on `oauthProfileId`: when set, it resolves the per-profile token via `getValidCodexCredentials(profileId)` (disk-backed, refresh-on-demand, de-duplicated by profileId) and dispatches through the existing `createOpenAIOAuthModel` factory — the same ChatGPT-backend code path `/connect:chatgpt` uses. `/providers:remove` on a codex profile also clears that profile's entry from `codex-oauth.json`. `/connect:chatgpt` stays unchanged alongside it.
