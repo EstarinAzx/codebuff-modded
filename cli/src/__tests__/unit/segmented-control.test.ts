@@ -28,6 +28,7 @@ const theme: ChatTheme = {
   // Context
   aiLine: '#0a0',
   userLine: '#08f',
+  aiPanelBorder: '#fa0',
   agentToggleHeaderBg: '#f60',
   agentToggleExpandedBg: '#14e',
   agentFocusedBg: '#334155',

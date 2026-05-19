@@ -9,6 +9,16 @@ tags: [decisions, modded]
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
 
+## 2026-05-19 — Dedicated `aiPanelBorder` theme key for the prose panel (0.2.0)
+
+**Decision:** Introduce a new top-level `ChatTheme` field `aiPanelBorder` (`#fbbf24` dark / `#d97706` light, amber) and use it as the primary resolution for the bordered AI-prose panel in `message-block.tsx`. Fallback chain: `theme.aiPanelBorder ?? theme.secondary ?? theme.aiLine ?? theme.foreground`. Sub-agent group borders in `blocks/agent-branch-item.tsx` are untouched and continue to use `theme.secondary` (expanded) / `theme.muted` (collapsed).
+
+**Why:** 0.1.12 left the prose panel border and the sub-agent expanded border both at `theme.secondary` (blue-gray `#a3aed0`). When the assistant's reply was preceded by spawned sub-agents, the panel visually merged into the agent tree — no way to see at a glance "this is the final answer". Three alternatives considered: (a) reuse `theme.primary` (lime) — rejected, already overloaded with userLine, headings, and the logo accent; another lime panel makes chat monotone. (b) reuse `theme.link` (blue `#3B82F6`) — rejected, blue-on-blue with `secondary` is weak contrast and bends the link semantic. (c) dedicated field with warm hue — picked. Warm-vs-cool is the strongest contrast axis against the existing blue-gray sub-agent borders, harmonises with the warm `markdown.headingFg` yellow already rendered inside the panel, and earns its own semantic role for future retheming. Same precedent as `aiLine`, `userLine`, `imageCardBorder` — minor cosmetic role with its own theme key.
+
+**Trade-off accepted:** New required field on `ChatTheme` interface — any test fixture or theme override literal that constructs a full `ChatTheme` must add the field (segmented-control test fixture patched). Partial-override flow via `parseThemeOverrides()` is unaffected (Partial<ChatTheme> consumers still compile). Backward-safe at runtime via the `??` fallback chain.
+
+**Reversibility:** easy. Remove the field from the interface + defaults, revert the `aiBorderColor` line in `message-block.tsx`, and the panel falls back to `theme.secondary` — pre-0.2.0 behaviour. Three-file revert.
+
 ## 2026-05-19 — Propagate the BYOK env-gate to all backend-touching surfaces (0.1.10)
 
 **Decision:** Every CLI surface that talks to codebuff.com — three React hooks (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) and the `LoginModal` render gate in `app.tsx` — now short-circuits when `process.env.CODEBUFF_USE_BACKEND !== '1'`, independent of whether a BYOK profile is registered. The hooks' `BYOK_AT_BOOT` flags previously gated *only* on `getActiveProfile() !== null`. The `LoginModal` gate previously only checked `requireAuth`/`isAuthenticated` without re-checking the env, so the `/logout` handler's `setIsAuthenticated(false)` could still surface the modal post-boot. The `/logout` command itself now short-circuits in BYOK default mode with a pointer to `/providers:remove` instead of mutating auth state.

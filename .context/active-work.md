@@ -3,24 +3,30 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
 tags: [context, active-work]
-ship: 0.1.12 (shipped)
+ship: 0.2.0 (shipping)
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7_
-_At commit: `modded` tip `679464be2` (0.1.12 ship)_
+_At commit: `modded` tip (0.2.0 ship in progress)_
 
 ## Current focus
 
-Nothing in flight. `codebuff-mod@0.1.12` is published — npm package,
-GH release with all three platform tarballs (win32-x64, linux-x64,
-linux-arm64), tag `v0.1.12` pushed, local user-side binary swapped
-(prior 0.1.11 archived as `codebuff-mod.exe.0111`).
+Shipping `codebuff-mod@0.2.0` — cosmetic minor bump. AI prose-panel
+border now uses a dedicated `theme.aiPanelBorder` (amber `#fbbf24` dark
+/ `#d97706` light) so it visibly stands apart from sub-agent borders
+(which keep `theme.secondary` blue-gray). Reason: 0.1.12 left both
+borders the same colour — prose panel got lost in the agent tree.
 
 ## State
 
-- **In flight:** nothing.
+- **In flight:** 0.2.0 publish — version bumped in `cli/package.json` +
+  `cli/release/package.json`, new theme key wired through interface,
+  defaults, and `message-block.tsx`; test fixture patched; typecheck
+  clean. Pending: commit, push branch + tag, build all three binaries
+  (win32-x64 native, linux-x64 + linux-arm64 cross via C:\cb junction),
+  `gh release create v0.2.0`, `npm publish` from `cli/release/`.
 - **Recently shipped — 0.1.12 (commit `679464be2`):** cosmetic refinement
   of 0.1.11. The bordered AI panel now hugs only the assistant's final
   textual reply. Thinking blocks, tool calls, and sub-agent groups render
@@ -37,9 +43,9 @@ linux-arm64), tag `v0.1.12` pushed, local user-side binary swapped
   `2700c5f07`):** closed two BYOK gates 0.1.7 missed (fresh-install
   "connecting…" stuck indicator and `/logout` re-triggering the dead
   `LoginModal`). See [[decisions]] for the full rationale.
-- **Typecheck at 0.1.12 ship:** `bun run --filter='@codebuff/cli'
+- **Typecheck at 0.2.0 ship:** `bun run --filter='@codebuff/cli'
   typecheck` clean.
-- **Test status at 0.1.12 ship:** broader 14 pre-existing test
+- **Test status at 0.2.0 ship:** broader 14 pre-existing test
   failures from the 0.1.10 baseline remain unaddressed and unchanged
   (categories: `usePathTabCompletion` Windows-path-slash quirks,
   `fetchUsageData` env-config missing `NEXT_PUBLIC_CODEBUFF_APP_URL`,
@@ -87,6 +93,14 @@ new user direction.
 
 ## Recent context
 
+- 0.2.0 differentiates prose panel border from sub-agent borders by
+  introducing a dedicated `theme.aiPanelBorder` field (amber). Resolution
+  chain in `message-block.tsx`: `aiPanelBorder ?? secondary ?? aiLine ??
+  foreground` — backward-safe if a theme override file omits the key.
+  Sub-agent borders in `blocks/agent-branch-item.tsx` continue to use
+  `theme.secondary` (expanded) / `theme.muted` (collapsed). Visual
+  contrast axis is warm-vs-cool, intentionally aligned with the warm
+  yellow markdown heading colour already inside the panel.
 - 0.1.12 narrows the 0.1.11 border so only the assistant's final prose
   is framed. Implementation lives in `message-block.tsx`: when `isAi`,
   scan `blocks` from the end for the last non-reasoning `text` block,

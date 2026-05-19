@@ -88,6 +88,11 @@ export interface ChatTheme {
   /** User message indicator line color */
   userLine: string
 
+  /** Border color for the AI's final-prose panel. Distinct from sub-agent
+   *  borders (theme.secondary) so the assistant's textual reply visibly
+   *  stands apart from spawned-agent groups. */
+  aiPanelBorder: string
+
   // Agent backgrounds (specific states that don't map to semantics)
   /** Agent toggle header background */
   agentToggleHeaderBg: string

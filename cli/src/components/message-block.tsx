@@ -211,7 +211,8 @@ export const MessageBlock = memo(({
     isAi && blocks && hasTrailingProse ? blocks.slice(0, lastProseBlockIdx) : null
   const aiTailBlocks =
     isAi && blocks && hasTrailingProse ? blocks.slice(lastProseBlockIdx) : null
-  const aiBorderColor = theme.secondary ?? theme.aiLine ?? theme.foreground
+  const aiBorderColor =
+    theme.aiPanelBorder ?? theme.secondary ?? theme.aiLine ?? theme.foreground
 
   return (
     <box

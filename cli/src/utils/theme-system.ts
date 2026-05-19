@@ -896,6 +896,7 @@ const DEFAULT_CHAT_THEMES: Record<ThemeName, ChatTheme> = {
     // Context-specific
     aiLine: '#6b7280',
     userLine: '#9EFC62',
+    aiPanelBorder: '#fbbf24',
 
     // Agent backgrounds
     agentToggleHeaderBg: '#f97316',
@@ -961,6 +962,7 @@ const DEFAULT_CHAT_THEMES: Record<ThemeName, ChatTheme> = {
     // AI/User context
     aiLine: '#6b7280',
     userLine: '#65A83E',
+    aiPanelBorder: '#d97706',
 
     // Agent context
     agentToggleHeaderBg: '#ea580c',
