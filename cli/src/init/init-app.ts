@@ -64,6 +64,7 @@ export async function initializeApp(params: { cwd?: string }): Promise<void> {
         baseUrl: profile.baseUrl,
         apiKey: profile.apiKey,
         model: profile.model,
+        oauthProfileId: profile.oauthProfileId,
       })
     }
   } catch (error) {

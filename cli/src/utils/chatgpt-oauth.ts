@@ -14,10 +14,12 @@ import {
 } from '@codebuff/common/constants/chatgpt-oauth'
 import {
   clearChatGptOAuthCredentials,
+  clearCodexCredentials,
   getChatGptOAuthCredentials,
   isChatGptOAuthValid,
   resetChatGptOAuthRateLimit,
   saveChatGptOAuthCredentials,
+  saveCodexCredentials,
 } from '@codebuff/sdk'
 import { safeOpen } from './open-url'
 
@@ -298,6 +300,46 @@ export function disconnectChatGptOAuth(): void {
   stopChatGptOAuthServer()
   clearChatGptOAuthCredentials()
   resetChatGptOAuthRateLimit()
+}
+
+/**
+ * Per-profile variant of `connectChatGptOAuth` used by `/providers:add codex`.
+ * Persists the resulting credentials under the BYOK profile id so multiple
+ * codex profiles (different ChatGPT accounts) can coexist in providers.json.
+ * Does NOT write to the legacy singleton `credentials.json#chatgptOAuth`.
+ */
+export function connectCodexOAuthForProfile(profileId: string): {
+  authUrl: string
+  credentials: Promise<ChatGptOAuthCredentials>
+} {
+  if (!profileId) {
+    throw new Error('connectCodexOAuthForProfile: profileId required')
+  }
+  stopChatGptOAuthServer()
+
+  const { codeVerifier, authUrl } = startChatGptOAuthFlow()
+  const credentialsPromise = startCallbackServer(codeVerifier).then(
+    (credentials) => {
+      // startCallbackServer routes through exchangeChatGptCodeForTokens, which
+      // already wrote to the singleton credentials.json. Re-save under the
+      // profile-keyed file so Path C dispatch can find it.
+      saveCodexCredentials(profileId, credentials)
+      return credentials
+    },
+  )
+
+  void safeOpen(authUrl)
+
+  return { authUrl, credentials: credentialsPromise }
+}
+
+/**
+ * Drop per-profile codex OAuth tokens. Called from /providers:remove on a
+ * codex profile. Does not touch the legacy singleton — `/connect:chatgpt`
+ * remains independently usable.
+ */
+export function disconnectCodexProfileOAuth(profileId: string): boolean {
+  return clearCodexCredentials(profileId)
 }
 
 export function getChatGptOAuthStatus(): {

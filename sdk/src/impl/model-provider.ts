@@ -32,6 +32,7 @@ import {
 } from '@codebuff/internal/openai-compatible/index'
 
 import { WEBSITE_URL } from '../constants'
+import { getValidCodexCredentials } from '../codex-credentials'
 import {
   getValidChatGptOAuthCredentials,
 } from '../credentials'
@@ -67,6 +68,13 @@ export type BYOKProfile = {
    * the template's id is one the user's provider actually serves).
    */
   model?: string
+  /**
+   * When set, Path C dispatches through the ChatGPT backend (Codex endpoint)
+   * using the per-profile OAuth token stored at
+   * `~/.config/manicode/codex-oauth.json` keyed by this id. apiKey is ignored
+   * for these profiles. Set for `codex` preset profiles only.
+   */
+  oauthProfileId?: string
 }
 
 let activeByokProfile: BYOKProfile | null = null
@@ -97,6 +105,11 @@ function normalizeProfile(profile: BYOKProfile, label: string): BYOKProfile {
     model: typeof profile.model === 'string' && profile.model.length > 0
       ? profile.model
       : undefined,
+    oauthProfileId:
+      typeof profile.oauthProfileId === 'string' &&
+      profile.oauthProfileId.length > 0
+        ? profile.oauthProfileId
+        : undefined,
   }
 }
 
@@ -248,6 +261,26 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
     // (agent templates would otherwise request models the user's provider can't
     // serve). User swaps with /model; see cli/src/commands/providers.ts.
     const resolvedModel = profileForRequest.model ?? model
+
+    // OAuth-backed profile (codex preset) — dispatch through the ChatGPT
+    // backend with the profile's per-profileId OAuth token instead of the
+    // direct-provider HTTP path. apiKey is ignored.
+    if (profileForRequest.oauthProfileId) {
+      const credentials = await getValidCodexCredentials(
+        profileForRequest.oauthProfileId,
+      )
+      if (!credentials) {
+        throw new Error(
+          `Codex OAuth credentials unavailable or expired for profile ` +
+            `"${profileForRequest.oauthProfileId}". Re-run /providers:add codex.`,
+        )
+      }
+      return {
+        model: createOpenAIOAuthModel(resolvedModel, credentials.accessToken),
+        isChatGptOAuth: true,
+      }
+    }
+
     return {
       model: createDirectProviderModel({
         profile: profileForRequest,

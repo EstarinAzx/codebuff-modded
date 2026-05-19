@@ -14,6 +14,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
+import { CHATGPT_BACKEND_BASE_URL } from '@codebuff/common/constants/chatgpt-oauth'
+import { getValidCodexCredentials } from '@codebuff/sdk'
+
 import type { ProviderPreset } from './providers'
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
@@ -41,6 +44,8 @@ export const MODEL_CATALOG: Record<ProviderPreset, string[]> = {
   openrouter: [],
   together: [],
   groq: [],
+  // Empty + special-cased → OAuth probe against ChatGPT backend
+  codex: [],
   // Empty + special-cased → free-text input
   'custom-openai': [],
 }
@@ -194,6 +199,44 @@ export async function fetchModelsFromEndpoint(params: {
   const json = (await res.json()) as { data?: Array<{ id?: unknown }> }
   if (!json || !Array.isArray(json.data)) {
     throw new Error('/models probe returned unexpected shape (no `data` array)')
+  }
+  return json.data
+    .map((m) => (typeof m.id === 'string' ? m.id : ''))
+    .filter((id) => id.length > 0)
+}
+
+/**
+ * Probe the ChatGPT backend /models endpoint using the codex profile's
+ * per-profile OAuth token. Throws on missing creds or non-2xx — the codex
+ * preset has no hardcoded fallback list by user request (0.2.1 design call),
+ * so the caller's catch path drives the UX.
+ */
+export async function fetchCodexModelsFromEndpoint(params: {
+  oauthProfileId: string
+  fetchImpl?: typeof globalThis.fetch
+}): Promise<string[]> {
+  const credentials = await getValidCodexCredentials(params.oauthProfileId)
+  if (!credentials) {
+    throw new Error(
+      'No valid Codex OAuth credentials. Re-run /providers:add codex.',
+    )
+  }
+  const url = `${CHATGPT_BACKEND_BASE_URL}/models`
+  const fetchFn = params.fetchImpl ?? globalThis.fetch
+  const res = await fetchFn(url, {
+    headers: {
+      Authorization: `Bearer ${credentials.accessToken}`,
+      Accept: 'application/json',
+      'OpenAI-Beta': 'responses=experimental',
+      originator: 'codex_cli_rs',
+    },
+  })
+  if (!res.ok) {
+    throw new Error(`Codex /models probe failed: ${res.status}`)
+  }
+  const json = (await res.json()) as { data?: Array<{ id?: unknown }> }
+  if (!json || !Array.isArray(json.data)) {
+    throw new Error('Codex /models probe returned unexpected shape')
   }
   return json.data
     .map((m) => (typeof m.id === 'string' ? m.id : ''))

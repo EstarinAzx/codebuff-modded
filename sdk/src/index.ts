@@ -35,6 +35,15 @@ export * from './constants'
 
 export { getUserInfoFromApiKey } from './impl/database'
 export * from './credentials'
+export {
+  getCodexCredentials,
+  saveCodexCredentials,
+  clearCodexCredentials,
+  refreshCodexCredentials,
+  getValidCodexCredentials,
+  getCodexCredentialsPath,
+} from './codex-credentials'
+export type { CodexCredentialsFile } from './codex-credentials'
 export { loadLocalAgents } from './agents/load-agents'
 export { loadMCPConfig, loadMCPConfigSync } from './agents/load-mcp-config'
 export { loadSkills } from './skills/load-skills'

@@ -7,6 +7,18 @@ tags: [gotchas]
 
 # Gotchas
 
+## Codex OAuth profiles live in TWO files — `providers.json` and `codex-oauth.json`
+
+Adding `/providers:add codex` writes a stub row to `~/.config/manicode/providers.json` (empty `apiKey`, `oauthProfileId` set to the profile's own id) AND a credentials blob to NEW `~/.config/manicode/codex-oauth.json` keyed by that same id. Both files are 0600. The legacy singleton `credentials.json#chatgptOAuth` (used by `/connect:chatgpt`) is untouched — the two flows coexist.
+
+Removing a codex profile via `/providers:remove` calls `clearCodexCredentials(profileId)` so the codex-oauth.json entry is dropped symmetrically. Manually editing providers.json to delete a codex row without touching codex-oauth.json leaves orphan tokens behind — harmless but worth a sweep if hand-editing.
+
+If a future migration wants multi-profile-shared OAuth, the `oauthProfileId` field is the seam: it defaults to `profile.id` at add-time but is stored explicitly so two profiles could point at the same credentials key. Today nothing exercises that fork.
+
+## Codex `/model` may not list anything
+
+`/model` on a codex profile probes `https://chatgpt.com/backend-api/models` with the OAuth bearer. Codex CLI itself ships with a fixed model catalog, so this endpoint may permanently 404. Per 0.2.1 design call there is NO hardcoded fallback list — on probe failure the command prints "Swap directly: /model <id>" and the user can still set any allowlisted id manually (see `OPENROUTER_TO_OPENAI_MODEL_MAP` in `common/src/constants/chatgpt-oauth.ts` for the canonical set). If the endpoint stays dead in practice, revisit the no-fallback choice in a future minor.
+
 ## LLM provider dispatch is a chained ternary
 
 `web/src/app/api/v1/chat/completions/_post.ts` has **two** parallel ladders — one for streaming, one for non-streaming. When adding a new provider, both must be wired or `/v1/chat/completions` will half-fail (most clients stream, so tests pass and non-stream callers silently break).

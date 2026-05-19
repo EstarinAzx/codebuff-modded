@@ -9,6 +9,10 @@
 import { setActiveByokProfile, setByokAgentBindings } from '@codebuff/sdk'
 
 import {
+  connectCodexOAuthForProfile,
+  disconnectCodexProfileOAuth,
+} from '../utils/chatgpt-oauth'
+import {
   addProfile,
   buildSdkBindings,
   clearAgentBinding,
@@ -29,6 +33,7 @@ import {
 import {
   clearCachedModels,
   fetchModelsFromEndpoint,
+  fetchCodexModelsFromEndpoint,
 } from '../utils/providers-models'
 
 import type { RouterParams } from './command-registry'
@@ -45,6 +50,7 @@ function syncSdkActiveProfile(profile: ProviderProfile | null): void {
     baseUrl: profile.baseUrl,
     apiKey: profile.apiKey,
     model: profile.model,
+    oauthProfileId: profile.oauthProfileId,
   })
 }
 
@@ -97,6 +103,7 @@ export function handleProvidersAdd(args: string): string {
   //   /providers:add <preset> <name> <apiKey>
   //   /providers:add custom-openai <apiKey-or-empty> <baseUrl> [model]
   //   /providers:add custom-openai <name> <apiKey> <baseUrl> [model]
+  //   /providers:add codex [name]                              (OAuth — no apiKey)
   const parts = args.trim().split(/\s+/).filter((p) => p.length > 0)
   if (parts.length < 1) {
     return [
@@ -104,12 +111,20 @@ export function handleProvidersAdd(args: string): string {
       '   or: /providers:add <preset> <name> <apiKey>',
       `Presets: ${listPresets().join(', ')}`,
       'For custom-openai: /providers:add custom-openai <name> <apiKey> <baseUrl> [model]',
+      'For codex (ChatGPT OAuth): /providers:add codex [name]',
     ].join('\n')
   }
 
   const presetRaw = parts[0]
   if (!isPreset(presetRaw)) {
     return `Unknown preset "${presetRaw}". Available: ${listPresets().join(', ')}`
+  }
+  if (presetRaw === 'codex') {
+    return [
+      'Codex (ChatGPT OAuth) profiles use the async add flow.',
+      'Run `/providers:add codex` via the slash-command router — the CLI ',
+      'handler opens your browser for OAuth and saves the profile on callback.',
+    ].join('\n')
   }
   const defaults = getPresetDefaults(presetRaw)
 
@@ -205,13 +220,104 @@ export function handleProvidersRemove(args: string): string {
   }
   const wasActive = getActiveProfile()?.id === target.id
   removeProfile(target.id)
+  // Drop per-profile OAuth tokens when removing a codex profile so re-adding
+  // forces a fresh browser flow (symmetric with /providers:add codex).
+  let droppedTokens = false
+  if (target.preset === 'codex' && target.oauthProfileId) {
+    droppedTokens = disconnectCodexProfileOAuth(target.oauthProfileId)
+  }
   // Resync SDK with whatever is active now + prune dropped bindings
   syncSdkActiveProfile(getActiveProfile())
   syncSdkAgentBindings()
   const tail = wasActive
     ? ` Active profile cleared${getActiveProfile() ? ` (now: ${getActiveProfile()!.name})` : ''}.`
     : ''
-  return `Removed profile "${target.name}" (${target.id}).${tail}`
+  const oauthTail = droppedTokens ? ' Dropped stored OAuth tokens.' : ''
+  return `Removed profile "${target.name}" (${target.id}).${tail}${oauthTail}`
+}
+
+/**
+ * Async OAuth flow for codex preset. The command-registry handler awaits the
+ * `completion` promise and appends a follow-up system message; `initial` is
+ * shown right away so the user sees the browser is opening.
+ *
+ * Steps:
+ *  1. Add a stub profile (apiKey empty, oauthProfileId = profile.id).
+ *  2. Open browser to ChatGPT OAuth; spin local callback server.
+ *  3. On success, persist creds under the profile id in codex-oauth.json and
+ *     activate the profile.
+ *  4. On failure, roll back by removing the stub profile.
+ */
+export function handleProvidersAddCodex(args: string): {
+  initial: string
+  completion: Promise<string>
+} {
+  const parts = args.trim().split(/\s+/).filter((p) => p.length > 0)
+  // parts[0] is 'codex'; parts[1+] joined as optional friendly name.
+  const customName = parts.slice(1).join(' ').trim()
+  const defaults = getPresetDefaults('codex')
+  const name = customName || defaults.name
+
+  let profile: ProviderProfile
+  try {
+    profile = addProfile({
+      preset: 'codex',
+      name,
+      apiKey: '',
+      makeActive: true,
+    })
+  } catch (err) {
+    return {
+      initial: `Failed to add codex profile: ${err instanceof Error ? err.message : String(err)}`,
+      completion: Promise.resolve(''),
+    }
+  }
+
+  let authUrl: string
+  let credsPromise: Promise<unknown>
+  try {
+    const flow = connectCodexOAuthForProfile(
+      profile.oauthProfileId ?? profile.id,
+    )
+    authUrl = flow.authUrl
+    credsPromise = flow.credentials
+  } catch (err) {
+    removeProfile(profile.id)
+    return {
+      initial: `Failed to start ChatGPT OAuth flow: ${err instanceof Error ? err.message : String(err)}`,
+      completion: Promise.resolve(''),
+    }
+  }
+
+  const completion = credsPromise
+    .then(() => {
+      // Re-load the saved profile so SDK sees the canonical row, then activate.
+      const saved =
+        loadProfiles().find((p) => p.id === profile.id) ?? profile
+      syncSdkActiveProfile(saved)
+      return [
+        `Connected codex profile "${saved.name}" (${saved.id}) and set active.`,
+        `  preset: ${saved.preset}`,
+        `  baseUrl: ${saved.baseUrl}`,
+        `  model: ${saved.model || '<unset>'}`,
+        '  auth: ChatGPT OAuth',
+      ].join('\n')
+    })
+    .catch((err: unknown) => {
+      // Roll back stub on failure so the user can retry cleanly.
+      removeProfile(profile.id)
+      syncSdkActiveProfile(getActiveProfile())
+      return `ChatGPT OAuth failed: ${err instanceof Error ? err.message : String(err)}. Profile rolled back.`
+    })
+
+  return {
+    initial: [
+      `Added codex profile "${profile.name}" (${profile.id}).`,
+      'Opening browser for ChatGPT OAuth — complete the flow to activate.',
+      `If the browser did not open, visit:\n  ${authUrl}`,
+    ].join('\n'),
+    completion,
+  }
 }
 
 export async function handleProvidersTest(): Promise<string> {
@@ -285,18 +391,29 @@ export async function handleModelCommand(args: string): Promise<string> {
   if (!profile) return 'No active profile. Add one with /providers:add.'
   const target = args.trim()
   if (!target) {
-    // List candidates via live probe so user sees available options
+    // List candidates via live probe so user sees available options.
+    // Codex profiles use OAuth bearer + ChatGPT backend endpoint; everything
+    // else uses the apiKey + provider base URL.
     try {
-      const models = await fetchModelsFromEndpoint({
-        baseUrl: profile.baseUrl,
-        apiKey: profile.apiKey,
-      })
+      const models =
+        profile.preset === 'codex'
+          ? await fetchCodexModelsFromEndpoint({
+              oauthProfileId: profile.oauthProfileId ?? profile.id,
+            })
+          : await fetchModelsFromEndpoint({
+              baseUrl: profile.baseUrl,
+              apiKey: profile.apiKey,
+            })
       const head = models.slice(0, 20)
       const tail = models.length > 20 ? `\n  …(${models.length - 20} more)` : ''
+      const probeSrc =
+        profile.preset === 'codex'
+          ? 'ChatGPT backend /models'
+          : `${profile.baseUrl}/models`
       return [
         `Current model: ${profile.model || '<unset>'}`,
         '',
-        `Available (live probe ${profile.baseUrl}/models):`,
+        `Available (live probe ${probeSrc}):`,
         ...head.map((m) => `  ${m}`),
       ].join('\n') + tail + '\n\nSwap: /model <id>'
     } catch (err) {
