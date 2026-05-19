@@ -17,6 +17,10 @@
  */
 
 import type { ModelRequestParams, ModelResult } from './model-provider'
+import type {
+  GetUserInfoFromApiKeyOutput,
+  UserColumn,
+} from '@codebuff/common/types/contracts/database'
 
 export interface ForkHooks {
   /**
@@ -33,6 +37,17 @@ export interface ForkHooks {
    * `database.ts` and the React BYOK_AT_BOOT gates.
    */
   skipBackend?: () => boolean
+
+  /**
+   * Provide synthetic user info when the codebuff.com user endpoint is
+   * skipped. `getUserInfoFromApiKey` expects a non-null record; returning
+   * a byok-local synthetic row satisfies that contract. Implementations
+   * guard internally so non-BYOK consumers fall through to the real
+   * backend (return `null`).
+   */
+  synthUserInfo?: <T extends UserColumn>(
+    fields: readonly T[],
+  ) => Awaited<GetUserInfoFromApiKeyOutput<T>> | null
 
   /**
    * Synthesize a process-local runId when central run-tracking is skipped

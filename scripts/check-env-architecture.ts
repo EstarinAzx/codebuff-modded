@@ -105,10 +105,11 @@ const packageConfigs: PackageConfig[] = [
     rootDir: path.join(cwd, 'sdk', 'src'),
     enforceRestrictedImports: true,
     additionalProcessEnvAllowlist: [
-      // BYOK fork: shouldSkipBackend() / Path C gate on the raw
-      // CODEBUFF_USE_BACKEND escape hatch.
-      'sdk/src/impl/database.ts',
+      // BYOK fork: Path B fail-fast guard reads CODEBUFF_USE_BACKEND directly.
       'sdk/src/impl/model-provider.ts',
+      // BYOK fork: shouldSkipBackend gates the codebuff.com backend skip on
+      // the CODEBUFF_USE_BACKEND escape hatch.
+      'sdk/src/impl/fork-impls/backend-skip.ts',
     ],
   },
 ]
