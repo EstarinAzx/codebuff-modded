@@ -10,7 +10,6 @@ import {
   handleLoginBYOKHint,
   handleModelCommand,
   handleProvidersAdd,
-  handleProvidersAddCodex,
   handleProvidersBind,
   handleProvidersBindings,
   handleProvidersList,
@@ -22,6 +21,7 @@ import {
 } from './providers'
 import { runBashCommand } from './router'
 import { handleUsageCommand } from './usage'
+import { tryForkPresetAdd } from '../fork-impls/preset-add-handlers'
 import { returnToFreebuffLanding } from '../hooks/use-freebuff-session'
 import { useThemeStore } from '../hooks/use-theme'
 import { WEBSITE_URL } from '../login/constants'
@@ -676,25 +676,7 @@ const ALL_COMMANDS: CommandDefinition[] = [
   defineCommandWithArgs({
     name: 'providers:add',
     handler: async (params, args) => {
-      // Codex preset uses the async OAuth flow — post the "browser opening"
-      // message immediately, then append the completion message once the
-      // user finishes (or fails) the browser authorization.
-      const firstArg = args.trim().split(/\s+/)[0]
-      if (firstArg === 'codex') {
-        const { initial, completion } = handleProvidersAddCodex(args)
-        params.setMessages((prev) => [
-          ...prev,
-          getUserMessage(params.inputValue.trim()),
-          getSystemMessage(initial),
-        ])
-        params.saveToHistory(params.inputValue.trim())
-        clearInput(params)
-        const result = await completion
-        if (result) {
-          params.setMessages((prev) => [...prev, getSystemMessage(result)])
-        }
-        return
-      }
+      if (await tryForkPresetAdd(params, args, clearInput)) return
       params.setMessages((prev) => [
         ...prev,
         getUserMessage(params.inputValue.trim()),
