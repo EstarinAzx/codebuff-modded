@@ -4,7 +4,13 @@ How to safely pull upstream Codebuff changes into this fork without breaking the
 
 > Read this BEFORE running `git merge` or `git pull` against upstream. The fork has hot conflict zones and a documented resolution map below.
 >
-> Coverage: fork through 1.0.1 (commit `4edf9c166`, ship date 2026-05-19). If the fork bumps past 1.0.x without this file being touched, suspect drift in the conflict map — re-grep before trusting.
+> Coverage: fork through **1.0.3** (shim-refactor ship, modded tip `e2e3efa18`, ship date 2026-05-19). Empirical conflict surface vs `upstream/main` at ship: 1177 lines added across 41 modified files (down from 1393/40 pre-shim — ~15% LOC reduction).
+>
+> **Big architectural shift in 1.0.3:** most fork-local edits to upstream files were extracted into a hook registry (`sdk/src/impl/fork-hooks.ts`) with implementations under `*/fork-impls/` directories. Upstream files now hold one-line dispatches into the registry instead of multi-line in-place logic. The conflict-map below reflects the shimmed shape. Pre-shim shape lives on branch `modded-pre-shim` + tag `v1.0.2-pre-shim` as rollback.
+>
+> Exception: React hooks #5–7 (`use-connection-status`, `use-gravity-ad`, `use-agent-validation`) were shimmed but reverted because bun-compile tree-shook the hook registration. They still hold the pre-shim `BYOK_AT_BOOT` in-place logic. See conflict map below.
+>
+> If the fork bumps past 1.0.x without this file being touched, suspect drift — re-grep before trusting.
 
 ---
 
@@ -16,31 +22,41 @@ CodebuffAI/codebuff  (upstream, public)
         │  git fetch upstream
         ▼
    main  ──────────► origin/main          ← clean mirror of upstream
-        │            (EstarinAzx/codebuff)
+        │            (EstarinAzx/codebuff-modded)
         │
         │  git merge main
         ▼
    modded ─────────► origin/modded         ← fork-local, published as codebuff-mod
-                     (EstarinAzx/codebuff)
+        │            (EstarinAzx/codebuff-modded)
+        │
+        ▼
+   modded-pre-shim ─► origin/modded-pre-shim  ← archive, pre-shim rollback anchor
+   (tag v1.0.2-pre-shim pins same commit)
 ```
 
 - **`main`** is a passive mirror of upstream `CodebuffAI/codebuff:main`. Never commit fork-local work here. Its only job is to stage the latest upstream tip before merging into `modded`.
-- **`modded`** is where every fork-local commit lives. This is the branch published to npm as `codebuff-mod` and tagged for GitHub Releases.
+- **`modded`** is where every fork-local commit lives. This is the branch published to npm as `codebuff-mod` and tagged for GitHub Releases. Tip at last update: `e2e3efa18` (v1.0.3, shim-refactored).
+- **`modded-pre-shim`** preserves the pre-shim shape (`6048b92ba`, v1.0.2). Rollback target if shim refactor proves regressing. Tag `v1.0.2-pre-shim` anchors the same commit independently of the branch.
 - One-way flow: `upstream/main` → `origin/main` → `modded`. Never push `modded` commits back into `main`.
 
 ---
 
 ## One-time setup — add the upstream remote
 
-The repo currently only has `origin` (the fork). Add upstream:
+As of 1.0.3 the `upstream` remote is configured. Verify:
+
+```bash
+git remote -v
+# expected:
+# origin    https://github.com/EstarinAzx/codebuff-modded.git (fetch/push)
+# upstream  https://github.com/CodebuffAI/codebuff.git (fetch/push)
+```
+
+If `upstream` is missing on a fresh checkout, add it:
 
 ```bash
 git remote add upstream https://github.com/CodebuffAI/codebuff.git
 git fetch upstream
-git remote -v
-# expected:
-# origin    https://github.com/EstarinAzx/codebuff.git (fetch/push)
-# upstream  https://github.com/CodebuffAI/codebuff.git (fetch/push)
 ```
 
 Lock down upstream push so accidental `git push upstream` fails fast:
@@ -121,9 +137,9 @@ cbm
 
 ```bash
 git push origin modded
-# bump cli/package.json version, then:
-git tag v0.X.Y && git push origin v0.X.Y
-gh release create v0.X.Y --repo EstarinAzx/codebuff dist-binaries/*.tar.gz
+# bump cli/package.json + cli/release/package.json version, commit, then:
+git tag vX.Y.Z && git push origin vX.Y.Z
+gh release create vX.Y.Z --repo EstarinAzx/codebuff-modded dist-binaries/*.tar.gz
 cd cli/release && npm publish
 ```
 
@@ -132,6 +148,30 @@ cd cli/release && npm publish
 ## Conflict map
 
 Every file below has a known reason to conflict on upstream merges. Resolution rule is per file — do not freelance.
+
+### Hook-registry pattern (1.0.3 shift)
+
+Many upstream files now hold a **one-line dispatch** into a fork-side hook registry instead of multi-line BYOK logic. Pattern:
+
+```ts
+// upstream file (the shim — one line in an in-place edit)
+const result = getForkHooks().<hookName>?.(...args)
+if (result !== undefined) return result
+// ... upstream code unchanged ...
+```
+
+Registry types live at `sdk/src/impl/fork-hooks.ts`. Implementations live in `fork-impls/` dirs (zero-conflict by design — upstream doesn't know they exist):
+
+- `sdk/src/impl/fork-impls/byok-resolver.ts` — Path C resolution (raw-key + codex OAuth)
+- `sdk/src/impl/fork-impls/backend-skip.ts` — `shouldSkipBackend` + synthetic user
+- `sdk/src/impl/fork-impls/runid-synth.ts` — `forkAwareStartAgentRun` wrap (BYOK runId synthesis)
+- `cli/scripts/fork-impls/scan-mod-agents.ts` — `.agents/mod-*` bundle scan
+- `cli/src/fork-impls/preset-add-handlers.ts` — codex async `/providers:add` handler
+- `web/src/fork-impls/provider-dispatch.ts` — opencode-go provider override
+
+Hook registration happens at boot in `cli/src/init/init-app.ts` (CLI side) and via SDK-side IIFEs in `byok-resolver.ts` (SDK side). If a hook registration is dropped (bun-compile tree-shaking has bitten this — see React-hooks note below), behavior silently falls back to upstream verbatim.
+
+**Merge implication:** when upstream touches a shimmed file, the conflict is usually limited to the one-line dispatch. If upstream restructures the function around the dispatch, re-anchor the one-line call at the equivalent spot. Don't replay the multi-line BYOK logic — that lives in `fork-impls/` now.
 
 ### HIGH conflict risk
 
@@ -192,19 +232,23 @@ grep -n "getModelsForPreset" cli/src/commands/providers.ts
 
 #### `web/src/app/api/v1/chat/completions/_post.ts`
 
-The chat-completions dispatch is a **two-parallel-ladder chained ternary** (one for streaming, one for non-streaming). The fork adds `useOpencodeGo` to both ladders. Any upstream provider addition collides at the slot where fork places `opencode-go`.
+**Shimmed in 1.0.3.** Dispatch ladder now consults `getForkHooks().dispatchOverrides?.[model]` BEFORE the two-parallel-ladder chained ternary. opencode-go logic lives in `web/src/fork-impls/provider-dispatch.ts`.
 
-**Resolve:** keep both upstream's new provider AND fork's `opencode-go` branch. Make sure the `&&` guard chain is threaded through all subsequent providers in BOTH ladders. See [.context/gotchas.md](./.context/gotchas.md) "LLM provider dispatch is a chained ternary."
+Residual in-place edits (~80+/54- lines): the override-check hook call + the `useOpencodeGo` declaration still live in `_post.ts` because some flow control around the dispatch table couldn't be cleanly extracted.
+
+**Resolve:** if upstream adds a new provider, slot it into the upstream ternary as usual; the fork's override hook is unaffected. If upstream restructures the dispatch ladder itself, re-anchor the `getForkHooks().dispatchOverrides` check at the top of BOTH the streaming and non-streaming paths so opencode-go gets first crack. See [.context/gotchas.md](./.context/gotchas.md) "LLM provider dispatch is a chained ternary."
 
 Sanity check after resolve:
 ```bash
-grep -n "useOpencodeGo\|useOpencodeZen" web/src/app/api/v1/chat/completions/_post.ts
-# both should appear exactly 4 times: 2 declarations + 2 ladder slots (stream + non-stream)
+grep -n "dispatchOverrides\|useOpencodeGo" web/src/app/api/v1/chat/completions/_post.ts
+# dispatchOverrides should appear in both stream + non-stream paths
 ```
 
 #### `cli/src/hooks/use-connection-status.ts`
 #### `cli/src/hooks/use-gravity-ad.ts`
 #### `cli/src/hooks/use-agent-validation.ts`
+
+⚠️ **Shim #5–7 was reverted in 1.0.3.** These hooks still hold the pre-shim multi-line `BYOK_AT_BOOT` in-place logic. Reason: bun-compile tree-shaking dropped the fork-hook registration in the compiled binary even after `sideEffects` allowlist + `pre-init/` placement. The ForkHooks registry exposes a `shouldSkipReactHook` slot that is currently unused (kept harmless for future revival).
 
 Each hook computes a module-level `BYOK_AT_BOOT` flag and early-returns when set. If upstream rewrites the hook body, the early-return wrapper may end up in the wrong place after auto-merge.
 
@@ -247,42 +291,34 @@ if (!byokModeNoBackend && /* upstream's conditions */) {
 }
 ```
 
-#### `cli/src/commands/command-registry.ts` — `/logout` handler
+#### `cli/src/commands/command-registry.ts` — `/logout` handler + codex preset dispatcher
 
-Since 0.1.10 the `/logout` handler short-circuits in BYOK default mode with a pointer to `/providers:remove` / `/providers:list` and never calls `logoutMutation` or `setIsAuthenticated(false)`. Under `CODEBUFF_USE_BACKEND=1` the upstream behavior is preserved verbatim.
+Two fork edits in this file:
 
-**Resolve:** keep the BYOK early-return at the top of the handler. If upstream changes the logout flow (new mutation API, different state shape), the BYOK branch can stay unchanged — it returns before any of the upstream machinery runs.
+1. **`/logout` BYOK short-circuit** (since 0.1.10) — NOT shimmed. Still in-place: handler short-circuits in BYOK default mode with a pointer to `/providers:remove` / `/providers:list`, never calls `logoutMutation` or `setIsAuthenticated(false)`. Under `CODEBUFF_USE_BACKEND=1` upstream behavior preserved verbatim.
+2. **Codex preset dispatch** (shimmed in 1.0.3 — shim #8) — `/providers:add` registry handler now calls `tryForkPresetAdd(preset, args)` before falling through to the sync preset path. Codex async OAuth flow logic lives in `cli/src/fork-impls/preset-add-handlers.ts`.
+
+Despite shim #8, this file still carries ~176+ added lines because the `/logout` branch + `/providers:*` command registrations couldn't be cleanly extracted.
+
+**Resolve:** keep both the `/logout` early-return AND the `tryForkPresetAdd` call. If upstream changes the logout flow or the registry signature, re-anchor both. The codex async flow itself (`handleProvidersAddCodex`) doesn't live here anymore.
 
 ### MEDIUM conflict risk
 
 #### `sdk/src/impl/model-provider.ts`
 
-Fork adds **Path C** (BYOK direct provider) ahead of upstream's Path A (ChatGPT OAuth singleton) and Path B (Codebuff backend). Path C itself now has TWO sub-branches as of 0.2.1:
+**Shimmed in 1.0.3.** Path C logic moved to `sdk/src/impl/fork-impls/byok-resolver.ts`. The upstream file now holds a one-line dispatch:
 
-- **Path C-oauth** — when the resolved profile has `oauthProfileId` set (codex preset), resolve creds via `getValidCodexCredentials(oauthProfileId)` and dispatch through `createOpenAIOAuthModel`. Same ChatGPT-backend code path Path A uses.
-- **Path C-direct** — every other preset (raw API key) dispatches through `createDirectProviderModel`.
-
-Path C must still run before Path A/B.
-
-**Resolve:** if upstream restructures path dispatch, keep both Path C sub-branches at the top. Per-agent binding lookup runs **before** branching so a bound profile's `oauthProfileId` is honored:
 ```ts
-if (activeByokProfile) {
-  const profileForRequest =
-    byokAgentBindings[params.agentId ?? ''] ?? activeByokProfile;
-  if (profileForRequest.oauthProfileId) {
-    // Path C-oauth — codex profiles
-    const creds = await getValidCodexCredentials(profileForRequest.oauthProfileId);
-    return createOpenAIOAuthModel(creds, params /* fork-merged model resolution */);
-  }
-  // Path C-direct — raw-key profiles
-  return createDirectProviderModel(profileForRequest, params);
-}
+const forkModel = getForkHooks().resolveByok?.(params)
+if (forkModel) return forkModel
 // ... upstream Path A / Path B logic ...
 ```
 
-Profile-model wins over template model in Path C-direct (`profile.model ?? params.model`). Path C-oauth uses `params.model` directly (codex picker writes the resolved id into the profile's `model` field, which the SDK reads as `params.model` after CLI threading).
+Residual in-place edits (~52+/6- lines): the hook call + module-level state exports (`setActiveByokProfile`, `setByokAgentBindings`, `BYOKProfile` type with `oauthProfileId?: string`) still live here because the CLI imports them.
 
-Also preserve exports: `setActiveByokProfile`, `getActiveByokProfile`, `setByokAgentBindings`, `getByokAgentBindings`, `BYOKProfile` (now carries optional `oauthProfileId?: string`).
+**Resolve:** if upstream restructures path dispatch, re-anchor the `getForkHooks().resolveByok?.(params)` call at the top of the resolver function. Path C must still run before Path A/B. The actual Path C-oauth / Path C-direct branching logic is no longer in this file — leave `byok-resolver.ts` alone unless its types break.
+
+Preserve exports: `setActiveByokProfile`, `getActiveByokProfile`, `setByokAgentBindings`, `getByokAgentBindings`, `BYOKProfile` (now carries optional `oauthProfileId?: string`).
 
 #### `cli/src/utils/providers.ts` — profile schema v3 + codex preset
 
@@ -302,9 +338,9 @@ grep -n "oauthProfileId" cli/src/utils/providers.ts sdk/src/impl/model-provider.
 
 #### `cli/src/types/theme-system.ts` + `cli/src/utils/theme-system.ts` + `cli/src/components/message-block.tsx`
 
-0.2.0 added a new required `aiPanelBorder` field on `ChatTheme` (amber `#fbbf24` dark / `#d97706` light) used by the bordered AI-prose panel. Fallback chain in `message-block.tsx`: `theme.aiPanelBorder ?? theme.secondary ?? theme.aiLine ?? theme.foreground`.
+0.2.0 added `aiPanelBorder` on `ChatTheme` (amber `#fbbf24` dark / `#d97706` light) used by the bordered AI-prose panel. **Made optional in 1.0.3** (shim #12 — `aiPanelBorder?: string`) so upstream test fixtures that build full `ChatTheme` literals don't need patching. Fallback chain in `message-block.tsx`: `theme.aiPanelBorder ?? theme.secondary ?? theme.aiLine ?? theme.foreground`.
 
-**Resolve:** if upstream rewrites `ChatTheme` or the message-block component, preserve `aiPanelBorder` on the interface + defaults and keep the fallback chain. Any test fixture that builds a full `ChatTheme` literal (not `Partial<ChatTheme>`) must include the field — segmented-control test fixture already patched, expect new upstream fixtures to need the same.
+**Resolve:** if upstream rewrites `ChatTheme` or the message-block component, preserve `aiPanelBorder?: string` (optional) on the interface + defaults and keep the fallback chain. Optional field means no test-fixture patching required — leave any new upstream fixtures untouched.
 
 Sanity check:
 ```bash
@@ -324,15 +360,15 @@ grep -n "agentId" sdk/src/impl/llm.ts
 
 #### `sdk/src/impl/database.ts`
 
-Fork adds `shouldSkipBackend()` gate. If upstream changes `getUserInfoFromApiKey` or `startAgentRun` signatures, the gate must still short-circuit when BYOK is active **and** `CODEBUFF_USE_BACKEND !== '1'`.
+**Shimmed in 1.0.3.** Backend-skip logic lives in `sdk/src/impl/fork-impls/backend-skip.ts`. Upstream file calls `getForkHooks().skipBackend?.()` + `getForkHooks().synthUserInfo?.()` at each backend entry; if either returns truthy, short-circuit.
 
-**Resolve:** keep the gate at the entry of each backend-touching function. Do NOT remove Path B — external SDK consumers may still set `CODEBUFF_USE_BACKEND=1` and expect upstream behavior.
+**Resolve:** if upstream changes `getUserInfoFromApiKey` or `startAgentRun` signatures, re-anchor the hook calls at the entry of each backend-touching function. Do NOT remove Path B — external SDK consumers may still set `CODEBUFF_USE_BACKEND=1` and expect upstream behavior.
 
 #### `cli/src/init/init-app.ts`
 
-Fork calls `setActiveByokProfile()` + `setByokAgentBindings()` at boot. If upstream restructures `init-app.ts` (e.g. async ordering), the boot push must still happen **before** the first agent spawn.
+Fork registers fork-hooks here at boot (`registerForkHooks({...})` + `setActiveByokProfile()` + `setByokAgentBindings()`). If upstream restructures `init-app.ts` (e.g. async ordering), the boot registration must still happen **before** the first agent spawn — otherwise SDK Path C dispatches silently fall back to upstream.
 
-**Resolve:** keep BYOK boot calls early in the init sequence. After upstream's auth/config load, before the SDK takes any request.
+**Resolve:** keep BYOK boot calls early in the init sequence. After upstream's auth/config load, before the SDK takes any request. Order matters: register hooks first, then push active profile + bindings.
 
 ### LOW conflict risk
 
@@ -357,17 +393,17 @@ grep -n "providers.ts\|providers-models.ts\|model-provider.ts\|database.ts" scri
 
 #### `packages/agent-runtime/src/run-agent-step.ts`
 
-Fork adds a 17-line UUID synthesis block at line ~685 to handle null `startAgentRun()` return.
+**Shimmed in 1.0.3 — now byte-identical to upstream.** UUID synthesis moved to an SDK-side `forkAwareStartAgentRun` wrap in `sdk/src/impl/fork-impls/runid-synth.ts`. The agent-runtime file no longer has any fork-local edit; the BYOK fallback runs at the SDK boundary instead.
 
-**Resolve:** keep the synthesis. If upstream renames `startAgentRun` or changes its return type, adapt the null-check accordingly. The synthesized id format is `byok-<agentTemplate.id>-<uuid>` — preserve that prefix so logs are greppable.
+**Resolve:** zero in-place edit means zero merge conflict here. If upstream renames `startAgentRun` or changes its return type, update the SDK-side wrap in `runid-synth.ts` accordingly. The synthesized id format remains `byok-<agentTemplate.id>-<uuid>` — preserve that prefix so logs are greppable.
 
 **Do NOT** revert to `?? ''` empty-string coercion. See [.context/gotchas.md](./.context/gotchas.md) "BYOK runId must be truthy, not just non-null."
 
 #### `cli/scripts/prebuild-agents.ts`
 
-Fork adds a scan block for `.agents/mod-*.ts` so BYOK templates ship inside the binary.
+**Shimmed in 1.0.3.** Reduced to a 5-line one-liner that calls into `cli/scripts/fork-impls/scan-mod-agents.ts`. The `.agents/mod-*.ts` glob + manifest append logic lives in the fork-impl.
 
-**Resolve:** keep the `mod-*` scan. If upstream rewrites the agent bundling system, port the `mod-*` glob into the new architecture. See [.context/gotchas.md](./.context/gotchas.md) "`prebuild-agents.ts` bundles `agents/` plus `.agents/mod-*.ts`."
+**Resolve:** keep the one-line shim call after upstream's scan. If upstream rewrites the agent bundling system, port the call site into the new architecture; the `mod-*` glob logic in `scan-mod-agents.ts` likely doesn't need changes. See [.context/gotchas.md](./.context/gotchas.md) "`prebuild-agents.ts` bundles `agents/` plus `.agents/mod-*.ts`."
 
 #### `cli/src/commands/command-registry.ts`
 #### `cli/src/data/slash-commands.ts`
@@ -404,6 +440,7 @@ Fork deliberately does NOT add `'opencode-go'` to `ALLOWED_MODEL_PREFIXES`. See 
 
 Fork-only new files — upstream doesn't know they exist. If a conflict surfaces here, it's a phantom from rename detection — investigate:
 
+**Pre-1.0.3 additions:**
 - `.agents/mod-default.ts`, `mod-lite.ts`, `mod-max.ts`, `mod-plan.ts`
 - `cli/src/commands/providers.ts`
 - `cli/src/utils/providers.ts`, `providers-models.ts`
@@ -416,6 +453,15 @@ Fork-only new files — upstream doesn't know they exist. If a conflict surfaces
 - `.claude/byok-rip-implementation-plan.md`
 - `.claude/opencode-go-implementation-plan.md`
 - `MERGE-STRATEGY.md` (this file)
+
+**Added in 1.0.3 (shim refactor):**
+- `sdk/src/impl/fork-hooks.ts` — hook registry contract
+- `sdk/src/impl/fork-impls/byok-resolver.ts` — Path C resolution (raw-key + codex OAuth) + per-agent binding lookup
+- `sdk/src/impl/fork-impls/backend-skip.ts` — `shouldSkipBackend` + synthetic-user fallback
+- `sdk/src/impl/fork-impls/runid-synth.ts` — `forkAwareStartAgentRun` BYOK runId UUID synth
+- `cli/scripts/fork-impls/scan-mod-agents.ts` — `.agents/mod-*` bundle scan
+- `cli/src/fork-impls/preset-add-handlers.ts` — codex async `/providers:add` handler
+- `web/src/fork-impls/provider-dispatch.ts` — opencode-go provider override
 
 Runtime-only files (not in repo, written at boot — listed so manual conflict-resolution doesn't accidentally `git add` them):
 
@@ -454,9 +500,11 @@ Run these before pushing `modded`. None should fail:
 |---|---|---|
 | Typecheck | `bun run typecheck` | 0 errors |
 | Tests | `bun run test` | all pass |
-| BYOK skip gate | `grep -n "shouldSkipBackend" sdk/src/impl/database.ts` | gate function present, called at backend entries |
-| Path C resolution | `grep -n "byokAgentBindings\[" sdk/src/impl/model-provider.ts` | per-agent lookup intact |
-| RunId synthesis | `grep -n "byok-" packages/agent-runtime/src/run-agent-step.ts` | UUID synth still in place |
+| BYOK skip gate | `grep -n "skipBackend\|synthUserInfo" sdk/src/impl/database.ts` | hook calls present at backend entries |
+| BYOK skip impl | `ls sdk/src/impl/fork-impls/backend-skip.ts` | fork-impl exists |
+| Path C resolution | `grep -n "resolveByok\|byokAgentBindings\[" sdk/src/impl/model-provider.ts sdk/src/impl/fork-impls/byok-resolver.ts` | shim call in model-provider, per-agent lookup in byok-resolver |
+| RunId synthesis | `grep -n "byok-" sdk/src/impl/fork-impls/runid-synth.ts` | UUID synth in fork-impl, NOT in agent-runtime |
+| Fork hooks registered | `grep -n "registerForkHooks\|setActiveByokProfile" cli/src/init/init-app.ts` | boot registration present |
 | BYOK_AT_BOOT gates | `grep -rn "BYOK_AT_BOOT" cli/src/hooks/` | 3 hooks still gated (use-connection-status, use-gravity-ad, use-agent-validation) |
 | BYOK env-gate everywhere | `git grep "CODEBUFF_USE_BACKEND" cli/src/ sdk/src/` | gate present in index.tsx, app.tsx (LoginModal render), use-auth-query.ts, use-{connection-status,gravity-ad,agent-validation}.ts, command-registry.ts (/logout), sdk/src/impl/database.ts (shouldSkipBackend) |
 | `/providers` commands | `grep -n "providers:" cli/src/commands/command-registry.ts` | all 8 registered |
