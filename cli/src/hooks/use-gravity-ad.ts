@@ -1,4 +1,4 @@
-import { WEBSITE_URL, getForkHooks } from '@codebuff/sdk'
+import { WEBSITE_URL } from '@codebuff/sdk'
 import { useEffect, useRef, useState } from 'react'
 
 import { useTerminalLayout } from './use-terminal-layout'
@@ -9,6 +9,7 @@ import { getAuthToken } from '../utils/auth'
 import { IS_FREEBUFF } from '../utils/constants'
 import { getCliEnv } from '../utils/env'
 import { logger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 
 import type { Message } from '@codebuff/sdk'
 
@@ -18,7 +19,31 @@ const ACTIVITY_THRESHOLD_MS = 30_000 // 30 seconds idle threshold for fetching n
 const MAX_AD_CACHE_SIZE = 50 // Maximum number of ads to keep in cache
 const ZEROCLICK_IMPRESSIONS_URL = 'https://zeroclick.dev/api/v2/impressions'
 
-const BYOK_AT_BOOT: boolean = getForkHooks().shouldSkipReactHook?.() ?? false
+/**
+ * BYOK-at-boot flag. Computed once at module load to avoid Rules-of-Hooks
+ * mismatches if the user's BYOK status changes mid-session (e.g. via
+ * /providers:add). When true, the ad hook returns a stable no-op shape and
+ * never fires network requests against codebuff.com.
+ *
+ * Two ways to be in BYOK at boot:
+ *   1. `CODEBUFF_USE_BACKEND !== '1'` — fork default. Ads pipeline points
+ *      at an unset host, so fetches just error in a loop. Skip outright.
+ *      Without this branch, a fresh install with no profile yet hits the
+ *      dead pipeline until the user runs `/providers:add` and restarts.
+ *   2. An active BYOK profile exists under the explicit backend escape
+ *      hatch. Path C handles requests directly, no ad-server needed.
+ *
+ * Trade-off: a user who registers their first BYOK profile mid-session
+ * keeps seeing ads until they restart the CLI. Acceptable in v1.
+ */
+const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
+  try {
+    return getActiveProfile() !== null
+  } catch {
+    return false
+  }
+})()
 
 /** No-op state for BYOK mode. Stable identity so React reuses the same object. */
 const BYOK_AD_STATE: GravityAdState = {

@@ -1,10 +1,30 @@
-import { getForkHooks } from '@codebuff/sdk'
 import { useEffect, useRef, useState } from 'react'
 
 import { getCodebuffClient } from '../utils/codebuff-client'
 import { logger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 
-const BYOK_AT_BOOT: boolean = getForkHooks().shouldSkipReactHook?.() ?? false
+/**
+ * BYOK fork: skip the codebuff.com health-check loop whenever the backend
+ * is not in use. Two ways to be in BYOK mode at boot:
+ *   1. The default — `CODEBUFF_USE_BACKEND !== '1'`. The codebuff.com host
+ *      isn't configured at all, so polling it sticks the status indicator
+ *      on "connecting…" forever (regression seen on fresh installs with no
+ *      profile yet, before the user runs `/providers:add`).
+ *   2. An active BYOK profile is registered. Requests route through Path C
+ *      directly to the provider, so there's no upstream socket to monitor.
+ * Gating on either condition keeps a profile-less fresh install out of the
+ * dead health-check loop, and still skips polling under the explicit
+ * `CODEBUFF_USE_BACKEND=1` escape hatch when a profile is also active.
+ */
+const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
+  try {
+    return getActiveProfile() !== null
+  } catch {
+    return false
+  }
+})()
 
 // Adaptive health check interval configuration
 // Progressively increases polling interval based on consecutive successful checks

@@ -7,10 +7,6 @@ import {
 } from '@codebuff/sdk'
 import { enableMapSet } from 'immer'
 
-// Register CLI-side fork hooks at module load — must happen before any React
-// hook module loads its BYOK_AT_BOOT IIFE.
-import '../fork-impls/skip-react-hook'
-
 import { initializeThemeStore } from '../hooks/use-theme'
 import { setProjectRoot } from '../project-files'
 import { initTimestampFormatter } from '../utils/helpers'

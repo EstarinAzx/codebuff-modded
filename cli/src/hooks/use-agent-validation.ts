@@ -1,11 +1,31 @@
-import { getForkHooks, validateAgents } from '@codebuff/sdk'
+import { validateAgents } from '@codebuff/sdk'
 import { useCallback, useState } from 'react'
 
 import { loadAgentDefinitions } from '../utils/local-agent-registry'
 import { logger } from '../utils/logger'
+import { getActiveProfile } from '../utils/providers'
 import { filterNetworkErrors } from '../utils/validation-error-helpers'
 
-const BYOK_AT_BOOT: boolean = getForkHooks().shouldSkipReactHook?.() ?? false
+/**
+ * BYOK fork: remote validation POSTs to codebuff.com /api/v1/agents/validate
+ * which fails against the sentinel URL when no real backend is configured.
+ * The failure surfaces as a silent message-send block (errors: []). Skip
+ * remote validation in both BYOK modes:
+ *   1. Default `CODEBUFF_USE_BACKEND !== '1'` — no backend at all, so the
+ *      remote endpoint is unreachable even when no profile is registered
+ *      yet (fresh-install case before `/providers:add`).
+ *   2. Active BYOK profile under the `CODEBUFF_USE_BACKEND=1` escape hatch
+ *      — Path C bypasses the validation endpoint anyway.
+ * Local schema check still runs in both cases.
+ */
+const BYOK_AT_BOOT: boolean = (() => {
+  if (process.env.CODEBUFF_USE_BACKEND !== '1') return true
+  try {
+    return getActiveProfile() !== null
+  } catch {
+    return false
+  }
+})()
 
 export type ValidationError = {
   id: string
