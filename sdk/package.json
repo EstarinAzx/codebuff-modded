@@ -15,7 +15,10 @@
     },
     "./package.json": "./package.json"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/impl/fork-impls/*.ts",
+    "./dist/**"
+  ],
   "files": [
     "dist",
     "README.md",

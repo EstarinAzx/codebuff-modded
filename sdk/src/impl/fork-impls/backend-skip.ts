@@ -46,7 +46,9 @@ function synthUserInfo<T extends UserColumn>(
   ) as Awaited<GetUserInfoFromApiKeyOutput<T>>
 }
 
-registerForkHooks({
-  skipBackend: shouldSkipBackend,
-  synthUserInfo,
-})
+export function registerBackendSkipHooks(): void {
+  registerForkHooks({
+    skipBackend: shouldSkipBackend,
+    synthUserInfo,
+  })
+}

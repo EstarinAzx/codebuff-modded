@@ -27,8 +27,8 @@ import { getValidCodexCredentials } from '../../codex-credentials'
 import { registerForkHooks } from '../fork-hooks'
 import { createOpenAIOAuthModel } from '../model-provider'
 
-import './backend-skip'
-import './runid-synth'
+import { registerBackendSkipHooks } from './backend-skip'
+import { registerRunidSynthHooks } from './runid-synth'
 
 import type { ModelRequestParams, ModelResult } from '../model-provider'
 import type { LanguageModel } from 'ai'
@@ -236,5 +236,9 @@ function createDirectProviderModel(params: {
 // Self-wire on module load so any SDK consumer that imports a BYOK setter
 // (transitively via `model-provider`'s re-exports) gets Path C dispatch
 // without an explicit registerForkHooks call. Idempotent — registerForkHooks
-// merges keys.
+// merges keys. Sibling fork-impls are registered via explicit function calls
+// here rather than side-effect imports so bun-compile's tree-shaker doesn't
+// drop them when bundling under sdk's sideEffects allowlist.
 registerForkHooks({ resolveByok })
+registerBackendSkipHooks()
+registerRunidSynthHooks()

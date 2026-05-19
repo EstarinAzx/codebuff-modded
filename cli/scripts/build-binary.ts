@@ -51,7 +51,13 @@ function runCommand(
   args: string[],
   options: SpawnSyncOptions = {},
 ) {
-  const result = spawnSync(command, args, {
+  // Windows PowerShell cannot resolve bare `bun` via spawnSync, and `shell: true`
+  // re-parses args via cmd.exe which breaks the spaced --outfile path. Substitute
+  // the absolute path of the currently-running bun executable instead.
+  const resolved =
+    command === 'bun' && process.execPath ? process.execPath : command
+
+  const result = spawnSync(resolved, args, {
     cwd: options.cwd,
     stdio: VERBOSE ? 'inherit' : 'pipe',
     env: options.env,

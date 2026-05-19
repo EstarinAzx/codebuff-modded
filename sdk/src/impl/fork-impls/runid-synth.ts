@@ -32,4 +32,6 @@ function synthRunId(templateId: string): string | null {
   return `byok-${templateId}-${randomToken()}`
 }
 
-registerForkHooks({ synthRunId })
+export function registerRunidSynthHooks(): void {
+  registerForkHooks({ synthRunId })
+}
