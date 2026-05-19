@@ -3,30 +3,34 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-05-19
 tags: [context, active-work]
-ship: 0.2.0 (shipping)
+ship: 0.2.0 (shipped)
 ---
 
 # Active Work
 
 _Last updated: 2026-05-19 by Opus 4.7_
-_At commit: `modded` tip (0.2.0 ship in progress)_
+_At commit: `modded` tip `b06feb335` (0.2.0 ship)_
 
 ## Current focus
 
-Shipping `codebuff-mod@0.2.0` — cosmetic minor bump. AI prose-panel
-border now uses a dedicated `theme.aiPanelBorder` (amber `#fbbf24` dark
-/ `#d97706` light) so it visibly stands apart from sub-agent borders
-(which keep `theme.secondary` blue-gray). Reason: 0.1.12 left both
-borders the same colour — prose panel got lost in the agent tree.
+Nothing in flight. `codebuff-mod@0.2.0` is published — npm package,
+GH release with all three platform tarballs (win32-x64, linux-x64,
+linux-arm64), tag `v0.2.0` pushed.
 
 ## State
 
-- **In flight:** 0.2.0 publish — version bumped in `cli/package.json` +
-  `cli/release/package.json`, new theme key wired through interface,
-  defaults, and `message-block.tsx`; test fixture patched; typecheck
-  clean. Pending: commit, push branch + tag, build all three binaries
-  (win32-x64 native, linux-x64 + linux-arm64 cross via C:\cb junction),
-  `gh release create v0.2.0`, `npm publish` from `cli/release/`.
+- **In flight:** nothing.
+- **Recently shipped — 0.2.0 (commit `b06feb335`):** dedicated
+  `theme.aiPanelBorder` field added to `ChatTheme` (amber `#fbbf24`
+  dark / `#d97706` light). The bordered AI prose panel now resolves
+  to `aiPanelBorder ?? secondary ?? aiLine ?? foreground`, visibly
+  separating from sub-agent borders (which keep `theme.secondary`
+  blue-gray). Touched: `cli/src/types/theme-system.ts` (interface),
+  `cli/src/utils/theme-system.ts` (both theme defaults),
+  `cli/src/components/message-block.tsx` (resolution chain),
+  `cli/src/__tests__/unit/segmented-control.test.ts` (fixture).
+  Three platform tarballs uploaded at
+  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v0.2.0.
 - **Recently shipped — 0.1.12 (commit `679464be2`):** cosmetic refinement
   of 0.1.11. The bordered AI panel now hugs only the assistant's final
   textual reply. Thinking blocks, tool calls, and sub-agent groups render
