@@ -3,6 +3,8 @@
 How to safely pull upstream Codebuff changes into this fork without breaking the BYOK rip on `modded`.
 
 > Read this BEFORE running `git merge` or `git pull` against upstream. The fork has hot conflict zones and a documented resolution map below.
+>
+> Coverage: fork through 1.0.1 (commit `4edf9c166`, ship date 2026-05-19). If the fork bumps past 1.0.x without this file being touched, suspect drift in the conflict map — re-grep before trusting.
 
 ---
 
@@ -133,6 +135,61 @@ Every file below has a known reason to conflict on upstream merges. Resolution r
 
 ### HIGH conflict risk
 
+#### `common/src/constants/chatgpt-oauth.ts` — `OPENROUTER_TO_OPENAI_MODEL_MAP`
+
+Since 1.0.0/1.0.1, this map literal is the **single source of truth** for codex-routable model ids. `Object.keys(map)` feeds BOTH:
+- `isChatGptOAuthModelAllowed` — the non-BYOK global ChatGPT OAuth allowlist (used by `/connect:chatgpt`).
+- `MODEL_CATALOG.codex` in `cli/src/utils/providers-models.ts` — the picker shown by `/model` on codex BYOK profiles.
+
+Fork holds 22 entries as of 1.0.1: GPT-5.5 at the top, GPT-5/5.4/5.3/5.2 family, codex-spark/codex-max/codex-mini variants, o3/o4-mini, gpt-4.1 family, `codexspark`/`codexplan` aliases at the tail. Insertion order = picker display order.
+
+**Resolve:** keep all fork-added ids; merge in any upstream additions at the position upstream put them (newer-first sort if ambiguous). Do NOT split the map into two — the single-source invariant is load-bearing for the picker. If upstream renames the constant or restructures the file, port the merged map under the new shape and re-verify both consumers grep clean:
+
+```bash
+grep -rn "OPENROUTER_TO_OPENAI_MODEL_MAP\|isChatGptOAuthModelAllowed" \
+  --include="*.ts" common/ cli/ sdk/ web/
+```
+
+Sanity check after resolve:
+```bash
+grep -c "^\s*'[^']*':" common/src/constants/chatgpt-oauth.ts
+# expect >= 22 lines inside the map literal (fork ships >= 22; upstream may add more)
+```
+
+If upstream introduces a separate codex picker catalog or live-probe path, **do not adopt it** — the fork tried a live probe in 0.2.1 and ripped it out in 1.0.0 (the `chatgpt.com/backend-api/models` endpoint does not exist for OAuth-bearer tokens; Codex CLI itself ships a fixed catalog for the same reason — see [.context/decisions.md](./.context/decisions.md) "OPENROUTER_TO_OPENAI_MODEL_MAP is the single source of truth").
+
+#### `cli/src/utils/providers-models.ts`
+
+Two fork-specific shapes survive here:
+1. `MODEL_CATALOG.codex` is derived from `Object.keys(OPENROUTER_TO_OPENAI_MODEL_MAP)` — not a hand-maintained list.
+2. `fetchCodexModelsFromEndpoint` was **deleted** in 1.0.0. Do not let upstream's diff reintroduce it.
+
+**Resolve:** if upstream restructures `MODEL_CATALOG` or `getModelsForPreset`, keep codex flowing through the same orchestrator every other preset uses (no codex-specific branch). Re-import `OPENROUTER_TO_OPENAI_MODEL_MAP` if upstream changes the catalog file layout.
+
+Sanity check:
+```bash
+grep -n "fetchCodexModelsFromEndpoint" cli/src/utils/providers-models.ts cli/src/commands/providers.ts
+# must return ZERO hits — the function was deleted at 1.0.0 (9c027af8e)
+grep -n "MODEL_CATALOG\[.codex.\]\|codex:.*OPENROUTER_TO_OPENAI" cli/src/utils/providers-models.ts
+# codex catalog must still derive from the map keys
+```
+
+#### `cli/src/commands/providers.ts` — codex add path + unified `/model`
+
+Two fork-specific surfaces in this file:
+1. `/providers:add codex [name]` is an **async** handler (`handleProvidersAddCodex`) that drives the OAuth PKCE flow before adding the profile. Other presets are sync.
+2. `handleModelCommand` routes all presets — including codex — through one `getModelsForPreset` call. Pre-1.0.0 had a codex-specific ternary; it is gone.
+
+**Resolve:** if upstream changes the command registry signature or splits add handlers, keep the codex async branch wired and keep the unified `/model` flow. The codex preset row needs `requiresApiKey: false` and the add handler must persist a stub row with empty `apiKey` + `oauthProfileId = profile.id`.
+
+Sanity check:
+```bash
+grep -n "handleProvidersAddCodex\|presetRaw === 'codex'" cli/src/commands/providers.ts
+# both must be present — codex routing depends on this entry point
+grep -n "getModelsForPreset" cli/src/commands/providers.ts
+# exactly one call site; no codex ternary
+```
+
 #### `web/src/app/api/v1/chat/completions/_post.ts`
 
 The chat-completions dispatch is a **two-parallel-ladder chained ternary** (one for streaming, one for non-streaming). The fork adds `useOpencodeGo` to both ladders. Any upstream provider addition collides at the slot where fork places `opencode-go`.
@@ -200,19 +257,60 @@ Since 0.1.10 the `/logout` handler short-circuits in BYOK default mode with a po
 
 #### `sdk/src/impl/model-provider.ts`
 
-Fork adds **Path C** (BYOK direct provider) ahead of upstream's Path A (ChatGPT OAuth) and Path B (Codebuff backend). The dispatch order matters — Path C must run first when `activeByokProfile !== null`.
+Fork adds **Path C** (BYOK direct provider) ahead of upstream's Path A (ChatGPT OAuth singleton) and Path B (Codebuff backend). Path C itself now has TWO sub-branches as of 0.2.1:
 
-**Resolve:** if upstream restructured the path dispatch, keep Path C resolution at the top:
+- **Path C-oauth** — when the resolved profile has `oauthProfileId` set (codex preset), resolve creds via `getValidCodexCredentials(oauthProfileId)` and dispatch through `createOpenAIOAuthModel`. Same ChatGPT-backend code path Path A uses.
+- **Path C-direct** — every other preset (raw API key) dispatches through `createDirectProviderModel`.
+
+Path C must still run before Path A/B.
+
+**Resolve:** if upstream restructures path dispatch, keep both Path C sub-branches at the top. Per-agent binding lookup runs **before** branching so a bound profile's `oauthProfileId` is honored:
 ```ts
 if (activeByokProfile) {
   const profileForRequest =
     byokAgentBindings[params.agentId ?? ''] ?? activeByokProfile;
+  if (profileForRequest.oauthProfileId) {
+    // Path C-oauth — codex profiles
+    const creds = await getValidCodexCredentials(profileForRequest.oauthProfileId);
+    return createOpenAIOAuthModel(creds, params /* fork-merged model resolution */);
+  }
+  // Path C-direct — raw-key profiles
   return createDirectProviderModel(profileForRequest, params);
 }
 // ... upstream Path A / Path B logic ...
 ```
 
-Also preserve exports: `setActiveByokProfile`, `getActiveByokProfile`, `setByokAgentBindings`, `getByokAgentBindings`, `BYOKProfile`.
+Profile-model wins over template model in Path C-direct (`profile.model ?? params.model`). Path C-oauth uses `params.model` directly (codex picker writes the resolved id into the profile's `model` field, which the SDK reads as `params.model` after CLI threading).
+
+Also preserve exports: `setActiveByokProfile`, `getActiveByokProfile`, `setByokAgentBindings`, `getByokAgentBindings`, `BYOKProfile` (now carries optional `oauthProfileId?: string`).
+
+#### `cli/src/utils/providers.ts` — profile schema v3 + codex preset
+
+Schema now carries `oauthProfileId?: string` on every `BYOKProfile` row. The `codex` preset entry in the registry has `requiresApiKey: false` (every other preset is `true`). `sanitizeProfile` and `addProfile` both preserve / default the `oauthProfileId` field — for codex it defaults to `profile.id` at add-time.
+
+**Resolve:** if upstream restructures the profile store or registry, keep:
+- The `codex` preset row with `requiresApiKey: false`.
+- `oauthProfileId?: string` on the persisted shape AND the SDK-export shape (`buildSdkBindings` must propagate it).
+- The `requiresApiKey` gate in `addProfile` so codex rows with empty `apiKey` are still accepted.
+
+Sanity check:
+```bash
+grep -n "oauthProfileId" cli/src/utils/providers.ts sdk/src/impl/model-provider.ts cli/src/commands/providers.ts
+# field must appear on the schema, in buildSdkBindings, in /providers handlers,
+# and in the SDK BYOKProfile type
+```
+
+#### `cli/src/types/theme-system.ts` + `cli/src/utils/theme-system.ts` + `cli/src/components/message-block.tsx`
+
+0.2.0 added a new required `aiPanelBorder` field on `ChatTheme` (amber `#fbbf24` dark / `#d97706` light) used by the bordered AI-prose panel. Fallback chain in `message-block.tsx`: `theme.aiPanelBorder ?? theme.secondary ?? theme.aiLine ?? theme.foreground`.
+
+**Resolve:** if upstream rewrites `ChatTheme` or the message-block component, preserve `aiPanelBorder` on the interface + defaults and keep the fallback chain. Any test fixture that builds a full `ChatTheme` literal (not `Partial<ChatTheme>`) must include the field — segmented-control test fixture already patched, expect new upstream fixtures to need the same.
+
+Sanity check:
+```bash
+grep -n "aiPanelBorder" cli/src/types/theme-system.ts cli/src/utils/theme-system.ts cli/src/components/message-block.tsx
+# field present in interface, defaults (dark + light), and the component fallback chain
+```
 
 #### `sdk/src/impl/llm.ts`
 
@@ -237,6 +335,25 @@ Fork calls `setActiveByokProfile()` + `setByokAgentBindings()` at boot. If upstr
 **Resolve:** keep BYOK boot calls early in the init sequence. After upstream's auth/config load, before the SDK takes any request.
 
 ### LOW conflict risk
+
+#### `cli/src/login/constants.ts` + `cli/src/hooks/use-logo.tsx` — banner art
+
+Fork ships ASCII art branded "CODEBUFF - M1" (full) / "CBM" (small). The full-logo width threshold in `use-logo.tsx` is raised from upstream's `70` to `92` to match the wider mark.
+
+**Resolve:** if upstream changes the logo art or threshold, keep the fork's "CODEBUFF - M*" mark and the `92` threshold. Bump the trailing version letter ("M1" → "M2") only when the fork hits a milestone version. See [.context/decisions.md](./.context/decisions.md) "Banner mark is 'CODEBUFF - M'".
+
+#### `scripts/check-env-architecture.ts` — env allowlist
+
+Fork adds raw-`process.env` consumers to `additionalProcessEnvAllowlist` for both `cli` and `sdk` packages so the env-architecture check passes:
+- cli: `index.tsx`, `hooks/use-auth-query.ts`, `utils/providers.ts`, `utils/providers-models.ts`
+- sdk: `impl/database.ts`, `impl/model-provider.ts`
+
+**Resolve:** keep both allowlist entries. If a new BYOK surface reads `process.env.CODEBUFF_USE_BACKEND` / `CODEBUFF_PROVIDERS_PATH` directly (not via the env schema), add it to the cli allowlist or the check will fail.
+
+Sanity check:
+```bash
+grep -n "providers.ts\|providers-models.ts\|model-provider.ts\|database.ts" scripts/check-env-architecture.ts
+```
 
 #### `packages/agent-runtime/src/run-agent-step.ts`
 
@@ -291,6 +408,7 @@ Fork-only new files — upstream doesn't know they exist. If a conflict surfaces
 - `cli/src/commands/providers.ts`
 - `cli/src/utils/providers.ts`, `providers-models.ts`
 - `cli/src/utils/__tests__/providers*.test.ts`
+- `sdk/src/codex-credentials.ts` (added 0.2.1 — per-profile codex OAuth creds store at `~/.config/manicode/codex-oauth.json`)
 - `sdk/src/impl/__tests__/database-byok-skip.test.ts`
 - `sdk/src/impl/__tests__/model-provider-byok.test.ts`
 - `web/src/llm-api/opencode-go.ts`
@@ -298,6 +416,13 @@ Fork-only new files — upstream doesn't know they exist. If a conflict surfaces
 - `.claude/byok-rip-implementation-plan.md`
 - `.claude/opencode-go-implementation-plan.md`
 - `MERGE-STRATEGY.md` (this file)
+
+Runtime-only files (not in repo, written at boot — listed so manual conflict-resolution doesn't accidentally `git add` them):
+
+- `~/.config/manicode/providers.json`
+- `~/.config/manicode/codex-oauth.json` (added 0.2.1)
+- `~/.config/manicode/credentials.json` (legacy `/connect:chatgpt` singleton — preserved)
+- `~/.config/manicode/models-cache.json`
 
 ---
 
@@ -336,7 +461,15 @@ Run these before pushing `modded`. None should fail:
 | BYOK env-gate everywhere | `git grep "CODEBUFF_USE_BACKEND" cli/src/ sdk/src/` | gate present in index.tsx, app.tsx (LoginModal render), use-auth-query.ts, use-{connection-status,gravity-ad,agent-validation}.ts, command-registry.ts (/logout), sdk/src/impl/database.ts (shouldSkipBackend) |
 | `/providers` commands | `grep -n "providers:" cli/src/commands/command-registry.ts` | all 8 registered |
 | mod-* prebuild | `grep -n "mod-" cli/scripts/prebuild-agents.ts` | scan block present |
-| Smoke test | `cbm` → `/providers:list` → run a small prompt | binds + responds |
+| Codex OAuth catalog | `grep -c "^\s*'[^']*':" common/src/constants/chatgpt-oauth.ts` | >= 22 entries in `OPENROUTER_TO_OPENAI_MODEL_MAP` |
+| Codex picker derives from map | `grep -n "MODEL_CATALOG\[.codex.\]\|codex:.*OPENROUTER" cli/src/utils/providers-models.ts` | catalog derived, no hand-list |
+| Dead codex probe gone | `grep -rn "fetchCodexModelsFromEndpoint\|chatgpt.com/backend-api/models" cli/src/` | ZERO hits (deleted 1.0.0) |
+| Codex creds module | `ls sdk/src/codex-credentials.ts && grep -n "getValidCodexCredentials\|clearCodexCredentials" sdk/src/` | file exists, both helpers exported |
+| `oauthProfileId` plumbed | `git grep "oauthProfileId" cli/src/ sdk/src/` | present in providers.ts, providers.ts handler, model-provider.ts, buildSdkBindings |
+| `aiPanelBorder` theme key | `git grep "aiPanelBorder" cli/src/` | present in theme-system types, defaults (dark+light), message-block fallback |
+| Env-architecture allowlist | `grep -n "providers.ts\|model-provider.ts" scripts/check-env-architecture.ts` | fork BYOK files still in `additionalProcessEnvAllowlist` |
+| Smoke test (raw-key) | `cbm` → `/providers:add openrouter <key>` → `/providers:list` → small prompt | binds + responds |
+| Smoke test (codex OAuth) | `cbm` → `/providers:add codex` → browser flow → `/model` → small prompt | OAuth completes, 22-entry picker, dispatch succeeds |
 
 ---
 

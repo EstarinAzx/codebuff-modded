@@ -1407,6 +1407,9 @@ export const Chat = ({
             backgroundColor: 'transparent',
             paddingLeft: 1,
             paddingRight: 2,
+            // One-row gap below last message so the AI prose panel's amber
+            // border doesn't visually touch the input bar's top border.
+            paddingBottom: 1,
           },
         }}
       >
