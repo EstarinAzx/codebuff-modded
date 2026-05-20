@@ -427,7 +427,7 @@ export const ChatInputBar = ({
             justifyContent: shouldCenterInputVertically
               ? 'center'
               : 'flex-start',
-            minHeight: shouldCenterInputVertically ? 3 : undefined,
+            minHeight: 3,
             gap: 0,
           }}
         >
