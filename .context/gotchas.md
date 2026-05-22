@@ -1,7 +1,7 @@
 ---
 type: gotchas
 project: codebuff (fork — modded branch)
-updated: 2026-05-19
+updated: 2026-05-22
 tags: [gotchas, shim]
 ---
 
@@ -18,6 +18,12 @@ If a future migration wants multi-profile-shared OAuth, the `oauthProfileId` fie
 ## Codex `/model` ships a fixed catalog
 
 `/model` on a codex profile lists `Object.keys(OPENROUTER_TO_OPENAI_MODEL_MAP)` straight from the catalog — no network probe. The OAuth bearer cannot list models against `chatgpt.com/backend-api/models` (no such route is exposed to that token); Codex CLI itself ships a fixed catalog baked into the binary for the same reason. If you add an id to `OPENROUTER_TO_OPENAI_MODEL_MAP` in `common/src/constants/chatgpt-oauth.ts`, it automatically appears in `/model` listings — no second edit needed. 1.0.0 reverted the 0.2.1 live-probe attempt after the endpoint was confirmed dead.
+
+## `opencode` and `opencode-go` model catalogs are asymmetric
+
+Since v1.0.6, `opencode-go` has an **empty** `MODEL_CATALOG` entry → it live-probes `https://opencode.ai/zen/go/v1/models` (cache-first, same path as openrouter/together/groq). The sibling `opencode` Zen preset still keeps a **hardcoded 2-id catalog** (`['opencode/minimax-m2.7', 'opencode/kimi-k2.6']`). Its endpoint (`https://opencode.ai/zen/v1/models`) live-serves ~40 ids, so Zen's `/model` under-reports for the same reason opencode-go did before v1.0.6. One-line fix (move it to the empty-catalog set) if a user reports it — left scoped-out deliberately.
+
+Catalog vs probe id shape: a **hardcoded** catalog id may carry a provider prefix (`opencode/minimax-m2.7`), but BYOK Path C (`createDirectProviderModel`) sends the model id **raw** to the endpoint, which wants the bare id (`minimax-m2.7`). Probe results from `data[].id` are already bare. So a prefixed hardcoded id is a latent dispatch bug; the probe path is correct by construction. v1.0.6 fixed this for opencode-go; the `opencode/` prefix on the Zen entries is the same unfixed trap.
 
 ## LLM provider dispatch is a chained ternary
 

@@ -1,13 +1,25 @@
 ---
 type: decisions
 project: codebuff (fork — modded branch)
-updated: 2026-05-19
+updated: 2026-05-22
 tags: [decisions, modded]
 ---
 
 # Decisions — fork-local
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
+
+## 2026-05-22 — `opencode-go` live-probes `/models` instead of a hardcoded catalog (1.0.6)
+
+**Decision:** Remove `opencode-go` from the hardcoded `MODEL_CATALOG` in `cli/src/utils/providers-models.ts` (was a single id, `['opencode-go/glm-5']`) and put it in the empty-catalog set alongside `openrouter` / `together` / `groq`. An empty catalog makes `getModelsForPreset` fall through to the live `<baseUrl>/models` probe (cache-first, 24h disk cache at `models-cache.json`, busted by `/providers:refresh-models`). The `opencode` Zen sibling preset was deliberately left on its 2-id hardcoded catalog — out of scope per user call.
+
+**Why:** A user reported `/model` on an opencode-go profile listing only one model. Root cause: the catalog entry had been a single hardcoded id since BYOK Phase 1 (`f608c34be`) — it never showed more. The orchestrator returns the catalog verbatim whenever it is non-empty and never probes. The opencode-go endpoint (`https://opencode.ai/zen/go/v1/models`) is OpenAI-compatible and live-serves 15+ ids (verified: HTTP 200, full `data` array). Two alternatives considered: (a) expand the hardcoded catalog to all 15 ids — rejected, guaranteed to drift as opencode.ai adds models, and the whole point of the empty-catalog probe path already exists for exactly this churn; (b) live-probe — picked, consistent with the three other churning-catalog presets and zero-maintenance.
+
+The change also fixes a latent prefix bug. The old catalog id `opencode-go/glm-5` carried an `opencode-go/` provider prefix, but BYOK Path C dispatch (`createDirectProviderModel` in `byok-resolver.ts`) sends the resolved model id raw in the chat-completions body, and the endpoint expects bare ids (`glm-5`). Picking the prefixed id from the picker would have produced a wrong `model` field. Probe results come back already-bare from `data[].id`, so the probe path is correct by construction.
+
+**Trade-off accepted:** `/model` now needs one network round-trip on first use per 24h window (cached after). Offline users get whatever is cached, or an empty list on a cold cache — same posture as openrouter/together/groq, acceptable. The `opencode` Zen preset keeps the identical hidden bug until someone fixes it the same way (tracked in [[active-work]] Deferred).
+
+**Reversibility:** trivial — restore the `'opencode-go': ['opencode-go/glm-5']` line. One-file revert.
 
 ## 2026-05-19 — Enforce todo closure via mod-* `instructionsPrompt` (1.0.4)
 

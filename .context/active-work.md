@@ -1,132 +1,136 @@
 ---
 type: active-work
 project: codebuff (fork — modded branch)
-updated: 2026-05-19
+updated: 2026-05-22
 tags: [context, active-work]
-ship: 1.0.4 (shipped — todo-closure enforcement)
+ship: 1.0.6 (shipped — opencode-go live model probe)
 ---
 
 # Active Work
 
-_Last updated: 2026-05-19 by Opus 4.7 (auto)_
-_At commit: `modded` tip `0395ffbc3` (v1.0.4 release commit, tag pinned)_
+_Last updated: 2026-05-22 by Opus 4.7 (auto)_
+_At commit: `modded` tip `3ce439802` (v1.0.6 release commit, tag pinned)_
 
 ## Current focus
 
-Nothing in flight. Just shipped v1.0.4 — template-only patch enforcing
-todo closure before `end_turn` in mod-default + mod-max. Three platform
-tarballs on GitHub Releases + launcher live on npm. No SDK / agent-runtime
-/ hook changes — pre-shim binary completely unaffected.
+Nothing in flight. Just shipped v1.0.6 — `opencode-go` preset now
+live-probes its `/models` endpoint instead of serving a one-id
+hardcoded catalog. Full release: three platform tarballs on GitHub
+Releases + `codebuff-mod@1.0.6` on npm.
 
 ## State
 
 - **In flight:** nothing.
-- **Recently shipped — v1.0.4 (tag commit `0395ffbc3`):**
-  - Added "Todo closure (mandatory before `end_turn`)" block to
-    `instructionsPrompt` in `.agents/mod-default.ts` + `.agents/mod-max.ts`.
-    Forces a final `write_todos` call resolving every item to
-    complete/cancelled before `end_turn`. Closes the recurring papercut
-    where the final summary todo stayed unchecked because the model
-    treated the summary message itself as completion.
-  - Template-only — zero changes to SDK, agent-runtime, hooks, or
-    shim infrastructure. Pre-shim binary behavior identical.
-  - Three platform tarballs at https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.0.4
-  - npm: `codebuff-mod@1.0.4` live on registry (sha
-    `63a98948224c68011c85baab32cc906e79b9e22a`).
+- **Recently shipped — v1.0.6 (tag commit `3ce439802`):**
+  - `cli/src/utils/providers-models.ts` — moved `opencode-go` out of
+    the hardcoded `MODEL_CATALOG` (was `['opencode-go/glm-5']`, a
+    single id) into the empty-catalog set. Empty catalog → orchestrator
+    live-probes `https://opencode.ai/zen/go/v1/models`, same path as
+    openrouter / together / groq. Endpoint serves 15+ ids; `/model`
+    and the `/providers:add` picker now list them all (24h disk cache,
+    busted by `/providers:refresh-models`).
+  - Also fixes a latent prefix bug: the old catalog id carried an
+    `opencode-go/` prefix, but Path C dispatch sends the model id raw
+    to the endpoint, which expects bare ids (e.g. `glm-5`). Probe
+    results are already raw — the fix removes the mismatch.
+  - One-file logic change + two version bumps. No SDK / agent-runtime
+    / hook changes.
+  - Three platform tarballs at
+    https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.0.6
+  - npm: `codebuff-mod@1.0.6` live (`latest`), launcher 9.4 kB.
+- **Previously shipped — v1.0.5 (tag commit `c20f080d9`):**
+  - Two TUI rendering bug fixes. `message-block.tsx`: shrink
+    `availableWidth` by 4 inside the amber AI panel (2 border + 2
+    padding cols) so inner elements like `AskUserBranch` stop seeping
+    past the amber box. `chat-input-bar.tsx`: always set `minHeight: 3`
+    on the input content wrapper so the bordered box can't collapse and
+    bleed border chars through text.
+  - Bug fixes to the 0.2.0 `aiPanelBorder` work — no new decision.
+- **Previously shipped — v1.0.4 (tag commit `0395ffbc3`):**
+  - Todo-closure enforcement block added to `instructionsPrompt` in
+    `.agents/mod-default.ts` + `.agents/mod-max.ts`.
 - **Previously shipped — v1.0.3 (tag commit `e2e3efa18`):**
-  - Hook-registry shim refactor: ~30 in-place fork edits → one-line
-    `getForkHooks().<name>?.(...)` dispatches. Logic moved to
-    `*/fork-impls/` dirs; registry at `sdk/src/impl/fork-hooks.ts`.
-  - 8 of 9 file-family shims landed; #5–7 (React hooks `BYOK_AT_BOOT`)
-    reverted — bun-compile tree-shook the fork-hook registration.
-  - Conflict surface vs `upstream/main`: 1393 → 1177 lines (~15% cut).
+  - Hook-registry shim refactor — ~30 in-place fork edits → one-line
+    `getForkHooks().<name>?.(...)` dispatches. See [[decisions]].
 - **Branch state:**
-  - `modded` → `0395ffbc3` (v1.0.4 release tip)
+  - `modded` → `3ce439802` (v1.0.6 release tip)
   - `modded-pre-shim` → `6048b92ba` (v1.0.2 anchor, archive)
-  - Tag `v1.0.2-pre-shim` pins `6048b92ba` independently.
-  - Tag `v1.0.3` pins shim refactor release `e2e3efa18`.
-  - Tag `v1.0.4` pins template-patch release `0395ffbc3`.
+  - Fork tags: `v1.0.0`–`v1.0.6` + `v1.0.2-pre-shim`. (The many
+    `v1.0.3XX`–`v1.0.6XX` tags are upstream `CodebuffAI/codebuff`
+    tags pulled by the `upstream` remote fetch — not fork releases.)
   - `upstream` remote configured against `CodebuffAI/codebuff`.
 - **Binaries:**
-  - `cli/bin/codebuff-mod.exe` → v1.0.4 build (todo-closure patch)
+  - `cli/bin/codebuff-mod.exe` → v1.0.6 win32-x64 build
+  - `cli/bin/codebuff-mod` → v1.0.6 linux-arm64 (last cross-compile
+    artifact — overwritten each linux build; not a stable "current"
+    binary, just leftover from the release tar step)
   - `cli/bin/codebuff-mod.pre-shim.exe` → v1.0.2 rollback
+  - `cli/dist-binaries/*.tar.gz` → the three v1.0.6 release tarballs
 - **Blocked:** none.
-- **Typecheck at ship:** not re-run for v1.0.4 (template-only change,
-  no TS surface touched). Last green run was v1.0.3 ship.
-- **Test status:** modded baseline preserved from v1.0.3 (14 pre-existing
-  failures unchanged; 19 BYOK tests green). No new tests for v1.0.4 —
-  prompt-only change, validated empirically by user.
-- **Smoke result for v1.0.4:** pending — patch addresses a user-reported
-  UX bug (todo "Summarize" left unchecked after `linelens` task).
-  Validate by re-running the `wordfreq` / `linelens` style multi-todo
-  prompt on v1.0.4 and confirming the final list closes cleanly.
-- **Working tree:** clean.
+- **Typecheck at ship:** not re-run for v1.0.6 (one-line catalog
+  change, no TS surface touched). Last green run was v1.0.3 ship.
+- **Test status:** modded baseline preserved (14 pre-existing
+  failures unchanged; 19 BYOK tests green). No new tests for v1.0.6 —
+  catalog data change, validated empirically (probed the live
+  endpoint, 200 + 15 ids).
+- **Smoke result for v1.0.6:** endpoint verified live during the fix
+  (`https://opencode.ai/zen/go/v1/models` → 200, 15 model ids). Full
+  in-CLI smoke pending — run `/model` on an opencode-go profile after
+  the binary auto-updates and confirm the list shows >1 id.
+- **Working tree:** clean (untracked `.codeboarding/` + local
+  `.claude/settings.local.json` only — both intentionally unstaged).
 
 ## Pick up here
 
 No active task. If next upstream merge produces >20 conflicting files,
-revisit deferred work below. If v1.0.4 smoke shows todo-closure still
-fails, consider strengthening the patch further (e.g. agent-runtime-side
-auto-close on `end_turn` instead of relying on prompt compliance — out
-of scope for v1.0.4 but tractable).
+revisit deferred work below.
 
 ## Deferred — chase only if real merge pain returns
 
-- **Heavy-file deeper shims.** Three files still hold large in-place
-  edits and could shim further if upstream starts touching them:
-  - `cli/src/commands/command-registry.ts` (176+ lines — codex
-    preset wiring + `/logout` BYOK branch beyond just the dispatch
-    shim)
-  - `cli/src/components/message-block.tsx` (164+ lines —
-    aiPanelBorder rendering logic, not just the resolver)
-  - `web/src/app/api/v1/chat/completions/_post.ts` (80+/54- —
-    opencode-go ladder still inline despite override hook)
-- **bun-compile tree-shake repro.** Why does bun's `--compile` mode
-  drop side-effect hook registrations even with `sideEffects`
-  allowlist + `pre-init/` placement? If a minimal repro lands a fix,
-  shims #5–7 (3 React hooks) can ship and the refactor delivers
-  closer to plan.
-- **`ForkHooks.shouldSkipReactHook` dead field.** Registry exposes
-  the slot but no caller uses it after the #5–7 revert. Harmless to
-  leave; ~10 lines to remove.
-- **`byok-resolver.ts` style asymmetry.** SDK uses explicit
-  `registerXxxHooks()`; CLI uses inline IIFE in `init-app.ts`.
-  Stylistic only, not broken.
+- **`opencode` (Zen) preset still hardcoded.** v1.0.6 fixed only
+  `opencode-go`. The sibling `opencode` Zen preset keeps its 2-id
+  hardcoded catalog (`['opencode/minimax-m2.7', 'opencode/kimi-k2.6']`)
+  with the same `opencode/`-prefix bug — its endpoint
+  (`https://opencode.ai/zen/v1/models`) live-serves ~40 ids. One-line
+  fix mirroring v1.0.6 if a user reports it. Left scoped-out per
+  user call.
+- **Heavy-file deeper shims.** `command-registry.ts`,
+  `message-block.tsx`, `web/.../_post.ts` still hold large in-place
+  edits; shim further only if upstream starts touching them.
+- **bun-compile tree-shake repro.** Why `--compile` drops side-effect
+  hook registrations — blocks shims #5–7 (3 React hooks).
+- **`ForkHooks.shouldSkipReactHook` dead field.** ~10 lines to remove.
+- **`byok-resolver.ts` style asymmetry.** SDK explicit-register vs
+  CLI inline IIFE. Stylistic only.
 
 ## Open questions (carry-over)
 
 - **`codexspark` / `codexplan` aliases unverified for OAuth-bearer
-  path.** Included in 1.0.1 with caveat. One-line revert in
-  `OPENROUTER_TO_OPENAI_MODEL_MAP` if either 4xx's on first real use.
-- **Token refresh ergonomics** — `getValidCodexCredentials` refreshes
-  on demand within Path C dispatch, but a refresh failure mid-conversation
-  throws into the agent loop. Surface a clearer reconnect hint?
-- **`oauthProfileId` rename** — equals `profile.id` today; forward-compat
-  hook for multi-profile-shared OAuth.
-- **`/connect:chatgpt` deprecation** — kept alongside the codex preset.
-  Retire singleton in a future minor?
+  path.** One-line revert in `OPENROUTER_TO_OPENAI_MODEL_MAP` if
+  either 4xx's.
+- **Token refresh ergonomics** — `getValidCodexCredentials` refresh
+  failure mid-conversation throws into the agent loop. Clearer
+  reconnect hint?
+- **`oauthProfileId` rename** — equals `profile.id` today;
+  forward-compat hook for multi-profile-shared OAuth.
+- **`/connect:chatgpt` deprecation** — retire singleton in a future
+  minor?
 - **macOS x64 + arm64 binaries** — still deferred. Ships only
   win32-x64, linux-x64, linux-arm64.
-- **Phase 3b/c OpenTUI providers panel** — text-mode covers full
+- **Phase 3b/c OpenTUI providers panel** — text-mode covers the full
   surface; visual wizard still nice-to-have.
-- **Hard-delete `web/` and `freebuff/`** once shim stays stable.
-  Path B is gated behind `CODEBUFF_USE_BACKEND=1` with zero known
-  consumers.
+- **Hard-delete `web/` and `freebuff/`** once the shim stays stable.
 - **Delete `LoginModal` + `cli/src/login/*`** — provably unreachable
-  post-0.1.10 since `app.tsx` gates on env.
-- **Origin remote URL stale** — `origin` already points at
-  `EstarinAzx/codebuff-modded.git` as of this session's push.
-  Confirmed via `git remote -v`.
+  post-0.1.10.
 
 ## Security carry-over
 
 - Previously-leaked OpenCode key revoked at opencode.ai on 2026-05-19.
-  Revoked key string still sits in plaintext in
+  Revoked key string still in plaintext in
   `~/.config/manicode/message-history.json`. User declined a scrub.
-- `~/.config/manicode/codex-oauth.json` (added 0.2.1) follows 0600
-  posture matching `providers.json` and `credentials.json`. Tokens
-  stored in plaintext; same threat model as the singleton it sits
-  beside.
+- `~/.config/manicode/codex-oauth.json` follows 0600, tokens in
+  plaintext — same threat model as `providers.json` /
+  `credentials.json`.
 - Pre-shim swap backup: `~/.config/manicode/providers.json.shim-bak`.
 
 ## Rollback path (if shim turns sour later)
