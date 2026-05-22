@@ -35,7 +35,6 @@ export const MODEL_CATALOG: Record<ProviderPreset, string[]> = {
     'claude-3.5-haiku',
   ],
   opencode: ['opencode/minimax-m2.7', 'opencode/kimi-k2.6'],
-  'opencode-go': ['opencode-go/glm-5'],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
   mistral: ['mistral-large-latest', 'codestral-latest', 'devstral-latest'],
@@ -43,6 +42,10 @@ export const MODEL_CATALOG: Record<ProviderPreset, string[]> = {
   openrouter: [],
   together: [],
   groq: [],
+  // opencode.ai/zen/go/v1 serves a churning 15+ model list via /models —
+  // probe it instead of a stale hardcoded id. Probe returns raw ids
+  // (e.g. `glm-5`), which is what Path C dispatch must send to the endpoint.
+  'opencode-go': [],
   // Codex: fixed catalog derived from the OAuth allowlist — no live probe.
   // The ChatGPT backend exposes no /models route to OAuth-bearer tokens;
   // Codex CLI itself ships a fixed catalog for the same reason. Keys of
