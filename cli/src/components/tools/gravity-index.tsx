@@ -6,38 +6,58 @@ import type { ToolRenderConfig } from './types'
 const asTrimmedString = (value: unknown): string =>
   typeof value === 'string' ? value.trim() : ''
 
-export const getGravityIndexDescription = (input: unknown): string => {
+const DEFAULT_NAME = 'Services'
+
+export interface GravityIndexParts {
+  /** Bold label naming the action in plain verb-first language. */
+  name: string
+  /** Non-bold target the action operates on (query, slug, category). May be empty. */
+  description: string
+}
+
+/**
+ * Splits a gravity_index tool call into a bold verb-first label (e.g.
+ * "Search services") and the plain target it acts on, so the action reads as
+ * a single natural phrase instead of a "Brand · Verb" subcommand.
+ */
+export const getGravityIndexParts = (input: unknown): GravityIndexParts => {
   if (!input || typeof input !== 'object') {
-    return 'Using service catalog'
+    return { name: DEFAULT_NAME, description: '' }
   }
 
   const params = input as Record<string, unknown>
   const action = asTrimmedString(params.action)
 
   switch (action) {
-    case 'search': {
-      const query = asTrimmedString(params.query)
-      return query ? `Searching ${query}` : 'Searching services'
-    }
+    case 'search':
+      return {
+        name: 'Search services',
+        description: asTrimmedString(params.query),
+      }
     case 'browse': {
       const category = asTrimmedString(params.category)
-      const query = asTrimmedString(params.q)
-      return ['Browsing', category || 'services', query ? `for ${query}` : '']
-        .filter(Boolean)
-        .join(' ')
+      const keyword = asTrimmedString(params.q)
+      return {
+        name: 'Browse services',
+        description: [category, keyword].filter(Boolean).join(' · '),
+      }
     }
     case 'list_categories':
-      return 'Listing service categories'
-    case 'get_service': {
-      const slug = asTrimmedString(params.slug)
-      return slug ? `Getting ${slug}` : 'Getting service details'
-    }
+      return { name: 'List service categories', description: '' }
+    case 'get_service':
+      return {
+        name: 'Fetch service',
+        description: asTrimmedString(params.slug),
+      }
     case 'report_integration': {
       const slug = asTrimmedString(params.integrated_slug)
-      return slug ? `Reporting ${slug} integration` : 'Reporting integration'
+      return {
+        name: 'Report integration',
+        description: slug ? `${slug} integration` : 'integration',
+      }
     }
     default:
-      return 'Using service catalog'
+      return { name: DEFAULT_NAME, description: '' }
   }
 }
 
@@ -49,13 +69,9 @@ export const GravityIndexComponent = defineToolComponent({
   toolName: 'gravity_index',
 
   render(toolBlock): ToolRenderConfig {
+    const { name, description } = getGravityIndexParts(toolBlock.input)
     return {
-      content: (
-        <SimpleToolCallItem
-          name="Service Catalog"
-          description={getGravityIndexDescription(toolBlock.input)}
-        />
-      ),
+      content: <SimpleToolCallItem name={name} description={description} />,
     }
   },
 })

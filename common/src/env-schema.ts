@@ -16,11 +16,17 @@ export const SENTINEL_BACKEND_URL = 'http://127.0.0.1:1'
  * actually use the backend can still provide the real values.
  */
 export const clientEnvSchema = z.object({
+  // PORT: BYOK env-gate — these stay defaulted/optional (NOT upstream's .min(1)
+  // required) so a standalone `cbm` with no codebuff.com env passes validation.
+  // Upstream's 2 new vars (FREEBUFF_APP_URL, GRAVITY_PIXEL_ID) are already
+  // optional, so they merge in verbatim without weakening the gate.
   NEXT_PUBLIC_CB_ENVIRONMENT: z.enum(['dev', 'test', 'prod']).default('prod'),
   NEXT_PUBLIC_CODEBUFF_APP_URL: z.url().default(SENTINEL_BACKEND_URL),
+  NEXT_PUBLIC_FREEBUFF_APP_URL: z.url().optional(),
   NEXT_PUBLIC_SUPPORT_EMAIL: z.string().default(''),
   NEXT_PUBLIC_POSTHOG_API_KEY: z.string().default(''),
   NEXT_PUBLIC_POSTHOG_HOST_URL: z.string().default(''),
+  NEXT_PUBLIC_GRAVITY_PIXEL_ID: z.uuid().optional(),
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().default(''),
   NEXT_PUBLIC_STRIPE_CUSTOMER_PORTAL: z.string().default(''),
   NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION_ID: z.string().optional(),
@@ -42,9 +48,11 @@ export type ClientEnv = z.infer<typeof clientEnvSchema>
 export const clientProcessEnv: ClientInput = {
   NEXT_PUBLIC_CB_ENVIRONMENT: process.env.NEXT_PUBLIC_CB_ENVIRONMENT,
   NEXT_PUBLIC_CODEBUFF_APP_URL: process.env.NEXT_PUBLIC_CODEBUFF_APP_URL,
+  NEXT_PUBLIC_FREEBUFF_APP_URL: process.env.NEXT_PUBLIC_FREEBUFF_APP_URL,
   NEXT_PUBLIC_SUPPORT_EMAIL: process.env.NEXT_PUBLIC_SUPPORT_EMAIL,
   NEXT_PUBLIC_POSTHOG_API_KEY: process.env.NEXT_PUBLIC_POSTHOG_API_KEY,
   NEXT_PUBLIC_POSTHOG_HOST_URL: process.env.NEXT_PUBLIC_POSTHOG_HOST_URL,
+  NEXT_PUBLIC_GRAVITY_PIXEL_ID: process.env.NEXT_PUBLIC_GRAVITY_PIXEL_ID,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
   NEXT_PUBLIC_STRIPE_CUSTOMER_PORTAL:

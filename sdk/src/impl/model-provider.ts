@@ -24,12 +24,10 @@ import { SENTINEL_BACKEND_URL } from '@codebuff/common/env-schema'
 import {
   OpenAICompatibleChatLanguageModel,
   VERSION,
-} from '@codebuff/internal/openai-compatible/index'
+} from '@codebuff/llm-providers/openai-compatible'
 
 import { WEBSITE_URL } from '../constants'
-import {
-  getValidChatGptOAuthCredentials,
-} from '../credentials'
+import { getValidChatGptOAuthCredentials } from '../credentials'
 import { getByokOpenrouterApiKeyFromEnv } from '../env'
 import {
   createChatGptBackendFetch,
@@ -124,7 +122,9 @@ type OpenRouterUsageAccounting = {
  *
  * This function is async because it may need to refresh the OAuth token.
  */
-export async function getModelForRequest(params: ModelRequestParams): Promise<ModelResult> {
+export async function getModelForRequest(
+  params: ModelRequestParams,
+): Promise<ModelResult> {
   const { apiKey, model, skipChatGptOAuth, costMode } = params
 
   const forked = await getForkHooks().resolveByok?.(params)
@@ -151,7 +151,10 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
 
       if (chatGptOAuthCredentials) {
         return {
-          model: createOpenAIOAuthModel(model, chatGptOAuthCredentials.accessToken),
+          model: createOpenAIOAuthModel(
+            model,
+            chatGptOAuthCredentials.accessToken,
+          ),
           isChatGptOAuth: true,
         }
       }
@@ -194,7 +197,11 @@ export async function getModelForRequest(params: ModelRequestParams): Promise<Mo
  * Exported so the fork's BYOK Path C-oauth (codex preset) can dispatch through
  * the same ChatGPT-backend code path Path A uses.
  */
-export function createOpenAIOAuthModel(model: string, oauthToken: string): LanguageModel {
+// PORT: keep `export` — fork-impls/byok-resolver.ts imports this for Path C-oauth dispatch.
+export function createOpenAIOAuthModel(
+  model: string,
+  oauthToken: string,
+): LanguageModel {
   const openAIModelId = toOpenAIModelId(model)
   const accountId = extractChatGptAccountId(oauthToken)
 

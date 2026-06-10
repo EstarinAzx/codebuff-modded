@@ -1,4 +1,6 @@
 import { buildArray } from '@codebuff/common/util/array'
+import { COMPOSIO_META_TOOL_NAMES } from '@codebuff/common/constants/composio'
+import { deepseekModels } from '@codebuff/common/constants/model-config'
 import {
   FREEBUFF_GEMINI_THINKER_AGENT_ID,
   FREEBUFF_GEMINI_THINKER_INSTRUCTIONS_PROMPT,
@@ -8,6 +10,7 @@ import {
 import { FREEBUFF_REVIEWER_AGENT_ID_BY_MODEL } from '@codebuff/common/constants/free-agents'
 import {
   canFreebuffModelSpawnGeminiThinker,
+  FREEBUFF_KIMI_MODEL_ID,
   FREEBUFF_MINIMAX_MODEL_ID,
 } from '@codebuff/common/constants/freebuff-models'
 
@@ -17,12 +20,15 @@ import {
   type SecretAgentDefinition,
 } from '../types/secret-agent-definition'
 
+const ENABLE_COMPOSIO_TOOLS = false
+
 export function createBase2(
   mode: 'default' | 'free' | 'lite' | 'max' | 'fast',
   options?: {
     hasNoValidation?: boolean
     planOnly?: boolean
     noAskUser?: boolean
+    noReview?: boolean
     model?: SecretAgentDefinition['model']
     providerOptions?: SecretAgentDefinition['providerOptions']
   },
@@ -31,6 +37,7 @@ export function createBase2(
     hasNoValidation = mode === 'fast',
     planOnly = false,
     noAskUser = false,
+    noReview = false,
     model: modelOverride,
     providerOptions,
   } = options ?? {}
@@ -40,14 +47,13 @@ export function createBase2(
   const isFree = mode === 'free' || mode === 'lite'
 
   const isSonnet = false
-  // Lite (paid Codebuff) defaults to Kimi: no data-retention surface in the
-  // CLI today, so we don't want to silently route Codebuff prompts through a
-  // model whose provider trains on user data. Free (freebuff) defaults to
-  // MiniMax M2.7; Kimi and DeepSeek are separate free agent variants.
+  // Lite (paid Codebuff) defaults to DeepSeek V4 Flash. The unqualified
+  // base2-free agent still uses MiniMax for legacy callers; new Freebuff
+  // clients select explicit free variants from the model picker.
   const model =
     modelOverride ??
     (mode === 'lite'
-      ? 'moonshotai/kimi-k2.6'
+      ? deepseekModels.deepseekV4Flash
       : mode === 'free'
         ? FREEBUFF_MINIMAX_MODEL_ID
         : 'anthropic/claude-opus-4.7')
@@ -57,6 +63,8 @@ export function createBase2(
     isFree && canFreebuffModelSpawnGeminiThinker(model)
   const freeCodeReviewerAgentId =
     FREEBUFF_REVIEWER_AGENT_ID_BY_MODEL[model] ?? 'code-reviewer-lite'
+  const contextPrunerMaxContextLength =
+    getBase2ContextPrunerMaxContextLength(model)
   const defaultProviderOptions = isFree
     ? {
         data_collection: 'deny' as const,
@@ -94,16 +102,20 @@ export function createBase2(
       'read_files',
       'read_subtree',
       !isFast && 'write_todos',
-      !isFast && !noAskUser && 'suggest_followups',
+      !noAskUser && 'suggest_followups',
       'str_replace',
       'write_file',
       !isFree && 'propose_str_replace',
       !isFree && 'propose_write_file',
       !noAskUser && 'ask_user',
+      'read_url',
       'skill',
       'set_output',
       'list_directory',
       'glob',
+      'render_ui',
+      'gravity_index',
+      ENABLE_COMPOSIO_TOOLS && [...COMPOSIO_META_TOOL_NAMES],
     ),
     spawnableAgents: buildArray(
       !isMax && 'file-picker',
@@ -119,7 +131,7 @@ export function createBase2(
       isMax && 'editor-multi-prompt',
       'tmux-cli',
       'browser-use',
-      isFree && freeCodeReviewerAgentId,
+      isFree && !noReview && freeCodeReviewerAgentId,
       isDefault && 'code-reviewer',
       isMax && 'code-reviewer-multi-prompt',
       hasFreeGeminiThinker && FREEBUFF_GEMINI_THINKER_AGENT_ID,
@@ -129,6 +141,8 @@ export function createBase2(
 
     systemPrompt: `You are Buffy, a strategic assistant that orchestrates complex coding tasks through specialized sub-agents. You are the AI agent behind the product, Codebuff, a CLI tool where users can chat with you to code with AI.
 
+Current date: ${PLACEHOLDER.CURRENT_DATE}.
+
 # Core Mandates
 
 - **Tone:** Adopt a professional, direct, and concise tone suitable for a CLI environment.
@@ -136,6 +150,7 @@ export function createBase2(
 - **Quality over speed:** Prioritize correctness over appearing productive. Fewer, well-informed agents are better than many rushed ones.
 - **Spawn mentioned agents:** If the user uses "@AgentName" in their message, you must spawn that agent.
 - **Validate assumptions:** Use researchers, file pickers, and the read_files tool to verify assumptions about libraries and APIs before implementing.
+- **Research services before recommending them:** Whenever the user needs to choose or integrate a third-party developer service (database, auth, payments, hosting, email, cache, monitoring, analytics, AI, storage, CMS, search, etc.), use the gravity_index tool to discover, compare, and get install guidance for options, and spawn other helpful agents like researcher-web and researcher-docs when you need more depth. Don't recommend or integrate a service from memory alone.
 - **Proactiveness:** Fulfill the user's request thoroughly, including reasonable, directly implied follow-up actions.
 - **Confirm Ambiguity/Expansion:** Do not take significant actions beyond the clear scope of the request without confirming with the user. If asked *how* to do something, explain first, don't just do it.${
       noAskUser
@@ -145,7 +160,12 @@ export function createBase2(
     }
 - **Be careful about terminal commands:** Be careful about instructing subagents to run terminal commands that could be destructive or have effects that are hard to undo (e.g. git push, git commit, running any scripts -- especially ones that could alter production environments (!), installing packages globally, etc). Don't run any of these effectful commands unless the user explicitly asks you to.
 - **Do what the user asks:** If the user asks you to do something, even running a risky terminal command, do it.
-- **Don't use set_output:** The set_output tool is for spawned subagents to report results. Don't use it yourself.
+- **Don't use set_output:** The set_output tool is for spawned subagents to report results. Don't use it yourself.${
+      ENABLE_COMPOSIO_TOOLS
+        ? `
+- **External apps:** When Composio tools are available and the user asks to work with connected apps or services like Gmail, Google Calendar, GitHub, Slack, Linear, or Notion, use them to search for the right app tools, help the user connect their account (use the render_ui tool to show a button if the user needs to click a link), and execute the requested action.`
+        : ''
+    }
 
 # Code Editing Mandates
 
@@ -188,6 +208,7 @@ Use the spawn_agents tool to spawn specialized agents to help you complete the u
     isMax &&
       `- IMPORTANT: You must spawn the editor-multi-prompt agent to implement the changes after you have gathered all the context you need. You must spawn this agent for non-trivial changes, since it writes much better code than you would with the str_replace or write_file tools. Don't spawn the editor in parallel with context-gathering agents.`,
     isFree &&
+      !noReview &&
       `- Spawn a ${freeCodeReviewerAgentId} to review the changes after you have implemented the changes.`,
     '- Spawn bashers sequentially if the second command depends on the the first.',
     isDefault &&
@@ -310,6 +331,7 @@ ${PLACEHOLDER.GIT_CHANGES_PROMPT}
           hasFreeGeminiThinker,
           hasNoValidation,
           noAskUser,
+          noReview,
           freeCodeReviewerAgentId,
         }),
     stepPrompt: planOnly
@@ -323,43 +345,161 @@ ${PLACEHOLDER.GIT_CHANGES_PROMPT}
           isFree,
           hasFreeGeminiThinker,
           noAskUser,
+          noReview,
           freeCodeReviewerAgentId,
         }),
 
     // handleSteps is serialized via .toString() and re-eval'd, so closure
     // variables like `isFree` are not in scope at runtime. Pick the right
     // literal-baked function here instead.
-    handleSteps: isFree
-      ? function* ({ params }) {
-          while (true) {
-            yield {
-              toolName: 'spawn_agent_inline',
-              input: {
-                agent_type: 'context-pruner',
-                params: { ...(params ?? {}), cacheExpiryMs: 10 * 60 * 1000 },
-              },
-              includeToolCall: false,
-            } as any
+    handleSteps: getBase2HandleSteps({
+      isFree: mode === 'free',
+      maxContextLength: contextPrunerMaxContextLength,
+    }),
+  }
+}
 
-            const { stepsComplete } = yield 'STEP'
-            if (stepsComplete) break
-          }
-        }
-      : function* ({ params }) {
-          while (true) {
-            yield {
-              toolName: 'spawn_agent_inline',
-              input: {
-                agent_type: 'context-pruner',
-                params: params ?? {},
-              },
-              includeToolCall: false,
-            } as any
+type Base2HandleSteps = NonNullable<SecretAgentDefinition['handleSteps']>
 
-            const { stepsComplete } = yield 'STEP'
-            if (stepsComplete) break
-          }
+function getBase2ContextPrunerMaxContextLength(
+  model: SecretAgentDefinition['model'],
+): 200_000 | 250_000 | 400_000 {
+  if (model === FREEBUFF_MINIMAX_MODEL_ID) return 200_000
+  if (model === FREEBUFF_KIMI_MODEL_ID) return 250_000
+  return 400_000
+}
+
+function getBase2HandleSteps({
+  isFree,
+  maxContextLength,
+}: {
+  isFree: boolean
+  maxContextLength: 200_000 | 250_000 | 400_000
+}): Base2HandleSteps {
+  if (isFree) {
+    if (maxContextLength === 200_000) return handleStepsFree200k
+    if (maxContextLength === 250_000) return handleStepsFree250k
+    return handleStepsFree400k
+  }
+  if (maxContextLength === 200_000) return handleSteps200k
+  if (maxContextLength === 250_000) return handleSteps250k
+  return handleSteps400k
+}
+
+const handleStepsFree200k: Base2HandleSteps = function* ({ params }) {
+  while (true) {
+    yield {
+      toolName: 'spawn_agent_inline',
+      input: {
+        agent_type: 'context-pruner',
+        params: {
+          maxContextLength: 200_000,
+          ...(params ?? {}),
+          cacheExpiryMs: 30 * 60 * 1000,
         },
+      },
+      includeToolCall: false,
+    } as any
+
+    const { stepsComplete } = yield 'STEP'
+    if (stepsComplete) break
+  }
+}
+
+const handleStepsFree250k: Base2HandleSteps = function* ({ params }) {
+  while (true) {
+    yield {
+      toolName: 'spawn_agent_inline',
+      input: {
+        agent_type: 'context-pruner',
+        params: {
+          maxContextLength: 250_000,
+          ...(params ?? {}),
+          cacheExpiryMs: 30 * 60 * 1000,
+        },
+      },
+      includeToolCall: false,
+    } as any
+
+    const { stepsComplete } = yield 'STEP'
+    if (stepsComplete) break
+  }
+}
+
+const handleStepsFree400k: Base2HandleSteps = function* ({ params }) {
+  while (true) {
+    yield {
+      toolName: 'spawn_agent_inline',
+      input: {
+        agent_type: 'context-pruner',
+        params: {
+          maxContextLength: 400_000,
+          ...(params ?? {}),
+          cacheExpiryMs: 30 * 60 * 1000,
+        },
+      },
+      includeToolCall: false,
+    } as any
+
+    const { stepsComplete } = yield 'STEP'
+    if (stepsComplete) break
+  }
+}
+
+const handleSteps200k: Base2HandleSteps = function* ({ params }) {
+  while (true) {
+    yield {
+      toolName: 'spawn_agent_inline',
+      input: {
+        agent_type: 'context-pruner',
+        params: {
+          maxContextLength: 200_000,
+          ...(params ?? {}),
+        },
+      },
+      includeToolCall: false,
+    } as any
+
+    const { stepsComplete } = yield 'STEP'
+    if (stepsComplete) break
+  }
+}
+
+const handleSteps250k: Base2HandleSteps = function* ({ params }) {
+  while (true) {
+    yield {
+      toolName: 'spawn_agent_inline',
+      input: {
+        agent_type: 'context-pruner',
+        params: {
+          maxContextLength: 250_000,
+          ...(params ?? {}),
+        },
+      },
+      includeToolCall: false,
+    } as any
+
+    const { stepsComplete } = yield 'STEP'
+    if (stepsComplete) break
+  }
+}
+
+const handleSteps400k: Base2HandleSteps = function* ({ params }) {
+  while (true) {
+    yield {
+      toolName: 'spawn_agent_inline',
+      input: {
+        agent_type: 'context-pruner',
+        params: {
+          maxContextLength: 400_000,
+          ...(params ?? {}),
+        },
+      },
+      includeToolCall: false,
+    } as any
+
+    const { stepsComplete } = yield 'STEP'
+    if (stepsComplete) break
   }
 }
 
@@ -374,6 +514,7 @@ function buildImplementationInstructionsPrompt({
   hasFreeGeminiThinker,
   hasNoValidation,
   noAskUser,
+  noReview,
   freeCodeReviewerAgentId,
 }: {
   isSonnet: boolean
@@ -384,6 +525,7 @@ function buildImplementationInstructionsPrompt({
   hasFreeGeminiThinker: boolean
   hasNoValidation: boolean
   noAskUser: boolean
+  noReview: boolean
   freeCodeReviewerAgentId: string
 }) {
   return `Act as a helpful assistant and freely respond to the user's request however would be most helpful to the user. Use your judgement to orchestrate the completion of the user's request using your specialized sub-agents and tools as needed. Take your time and be comprehensive. Don't surprise the user. For example, don't modify files if the user has not asked you to do so at least implicitly.
@@ -399,7 +541,7 @@ ${buildArray(
   !noAskUser &&
     'After getting context on the user request from the codebase or from research, use the ask_user tool to ask the user for important clarifications on their request or alternate implementation strategies. You should skip this step if the choice is obvious -- only ask the user if you need their help making the best choice.',
   (isDefault || isMax || isFree) &&
-    `- For any task requiring 3+ steps, use the write_todos tool to write out your step-by-step implementation plan. Include ALL of the applicable tasks in the list.${isFast ? '' : ' You should include a step to review the changes after you have implemented the changes.'}:${hasNoValidation ? '' : ' You should include at least one step to validate/test your changes: be specific about whether to typecheck, run tests, run lints, etc.'} You may be able to do reviewing and validation in parallel in the same step. Skip write_todos for simple tasks like quick edits or answering questions.`,
+    `- For any task requiring 3+ steps, use the write_todos tool to write out your step-by-step implementation plan. Include ALL of the applicable tasks in the list.${isFast || noReview ? '' : ' You should include a step to review the changes after you have implemented the changes.'}:${hasNoValidation ? '' : ' You should include at least one step to validate/test your changes: be specific about whether to typecheck, run tests, run lints, etc.'} You may be able to do reviewing and validation in parallel in the same step. Skip write_todos for simple tasks like quick edits or answering questions.`,
   hasFreeGeminiThinker && FREEBUFF_GEMINI_THINKER_INSTRUCTIONS_PROMPT,
   (isDefault || isMax) &&
     `- For quick problems, briefly explain your reasoning to the user. If you need to think longer, write your thoughts within the <think> tags. Finally, for complex problems, spawn the thinker agent to help find the best solution. (gpt-5-agent is a last resort for complex problems)`,
@@ -416,6 +558,7 @@ ${buildArray(
   (isDefault || isMax) &&
     `- Spawn a ${isDefault ? 'code-reviewer' : 'code-reviewer-multi-prompt'} to review the changes after you have implemented changes. (Skip this step only if the change is extremely straightforward and obvious.)`,
   isFree &&
+    !noReview &&
     `- Spawn a ${freeCodeReviewerAgentId} to review the changes after you have implemented changes. (Skip this step only if the change is extremely straightforward and obvious.)`,
   `- Inform the user that you have completed the task in one sentence or a few short bullet points.${isSonnet ? " Don't create any markdown summary files or example documentation files, unless asked by the user." : ''}`,
   !isFast &&
@@ -433,6 +576,7 @@ function buildImplementationStepPrompt({
   isFree,
   hasFreeGeminiThinker,
   noAskUser,
+  noReview,
   freeCodeReviewerAgentId,
 }: {
   isDefault: boolean
@@ -443,22 +587,22 @@ function buildImplementationStepPrompt({
   isFree: boolean
   hasFreeGeminiThinker: boolean
   noAskUser: boolean
+  noReview: boolean
   freeCodeReviewerAgentId: string
 }) {
   return buildArray(
     isMax &&
       `Keep working until the user's request is completely satisfied${!hasNoValidation ? ' and validated' : ''}, or until you require more information from the user.`,
-    'Consider loading relevant skills with the skill tool if they might help with the current task. Do not reload skills that were already loaded earlier in this conversation.',
     hasFreeGeminiThinker && FREEBUFF_GEMINI_THINKER_STEP_PROMPT,
     isMax &&
       `You must spawn the 'editor-multi-prompt' agent to implement code changes rather than using the str_replace or write_file tools, since it will generate the best code changes.`,
     (isDefault || isMax) &&
       `You must spawn a ${isDefault ? 'code-reviewer' : 'code-reviewer-multi-prompt'} to review the changes after you have implemented the changes and in parallel with typechecking or testing.`,
     isFree &&
+      !noReview &&
       `You must spawn a ${freeCodeReviewerAgentId} to review the changes after you have implemented the changes and in parallel with typechecking or testing.`,
-    `After completing the user request, summarize your changes in a sentence${isFast ? '' : ' or a few short bullet points'}.${isSonnet ? " Don't create any summary markdown files or example documentation files, unless asked by the user." : ''}.`,
-    !isFast &&
-      !noAskUser &&
+    `When the user request is complete, summarize your changes in a sentence${isFast ? '' : ' or a few short bullet points'}.${isSonnet ? " Don't create any summary markdown files or example documentation files, unless asked by the user." : ''}.`,
+    !noAskUser &&
       `At the end of your turn, you must use the suggest_followups tool to suggest around 3 next steps the user might want to take even if the user just asks a question.`,
   ).join('\n')
 }

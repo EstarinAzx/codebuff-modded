@@ -12,12 +12,17 @@ import {
   listMCPTools,
   callMCPTool,
 } from '@codebuff/common/mcp/client'
+import {
+  COMPOSIO_META_TOOL_NAMES,
+  isComposioMetaToolName,
+} from '@codebuff/common/constants/composio'
 import { toolNames } from '@codebuff/common/tools/constants'
 import { clientToolCallSchema } from '@codebuff/common/tools/list'
 import { AgentOutputSchema } from '@codebuff/common/types/session-state'
 import { extractApiErrorDetails } from '@codebuff/common/util/error'
 import { cloneDeep } from 'lodash'
 
+import { executeComposioToolViaServer } from './composio'
 import { getErrorStatusCode } from './error-utils'
 import { getAgentRuntimeImpl } from './impl/agent-runtime'
 import { getUserInfoFromApiKey } from './impl/database'
@@ -29,6 +34,7 @@ import { glob } from './tools/glob'
 import { listDirectory } from './tools/list-directory'
 import { getProjectPathLookupKeys } from './tools/path-utils'
 import { getFiles } from './tools/read-files'
+import { readUrl } from './tools/read-url'
 import { runTerminalCommand } from './tools/run-terminal-command'
 
 import type { CustomToolDefinition } from './custom-tool'
@@ -36,16 +42,8 @@ import type { RunState } from './run-state'
 import type { FileFilter } from './tools/read-files'
 import type { ServerAction } from '@codebuff/common/actions'
 import type { AgentDefinition } from '@codebuff/common/templates/initial-agents-dir/types/agent-definition'
-import type {
-  PublishedToolName,
-  ToolName,
-} from '@codebuff/common/tools/constants'
-import type {
-  ClientToolCall,
-  ClientToolName,
-  CodebuffToolOutput,
-  PublishedClientToolName,
-} from '@codebuff/common/tools/list'
+import type { ToolName } from '@codebuff/common/tools/constants'
+import type { PublishedClientToolName } from '@codebuff/common/tools/list'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
 import type { CodebuffFileSystem } from '@codebuff/common/types/filesystem'
 import type { ToolMessage } from '@codebuff/common/types/messages/codebuff-message'
@@ -71,6 +69,26 @@ const wrapContentForUserMessage = (
   }
   // Delegate to the shared utility which handles wrapping correctly
   return buildUserMessageContent(undefined, undefined, content)
+}
+
+type OverrideToolHandlers = {
+  [K in PublishedClientToolName]?: (input: any) => Promise<ToolResultOutput[]>
+} & {
+  // Include read_files separately, since it has a different signature.
+  read_files?: (input: {
+    filePaths: string[]
+  }) => Promise<Record<string, string | null>>
+}
+
+function isRunPauseError(error: unknown) {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    (('codebuffRunPaused' in error &&
+      (error as { codebuffRunPaused?: unknown }).codebuffRunPaused === true) ||
+      ('name' in error &&
+        (error as { name?: unknown }).name === 'CodebuffRunPausedError'))
+  )
 }
 
 export type CodebuffClientOptions = {
@@ -106,18 +124,7 @@ export type CodebuffClientOptions = {
   /** Optional filter to classify files before reading (runs before gitignore check) */
   fileFilter?: FileFilter
 
-  overrideTools?: Partial<
-    {
-      [K in ClientToolName & PublishedToolName]: (
-        input: ClientToolCall<K>['input'],
-      ) => Promise<CodebuffToolOutput<K>>
-    } & {
-      // Include read_files separately, since it has a different signature.
-      read_files: (input: {
-        filePaths: string[]
-      }) => Promise<Record<string, string | null>>
-    }
-  >
+  overrideTools?: OverrideToolHandlers
   customToolDefinitions?: CustomToolDefinition[]
 
   fsSource?: Source<CodebuffFileSystem>
@@ -177,6 +184,8 @@ export async function run(options: RunExecutionOptions): Promise<RunState> {
     const abortError = createAbortError(signal)
     return {
       sessionState: options.previousRun?.sessionState,
+      traceSessionId:
+        options.previousRun?.traceSessionId ?? crypto.randomUUID(),
       output: {
         type: 'error',
         message: abortError.message,
@@ -230,6 +239,7 @@ async function runOnce({
     spawn = require('child_process').spawn as CodebuffSpawn
   }
   const preparedContent = wrapContentForUserMessage(content)
+  let activeCustomToolDefinitions = customToolDefinitions ?? []
 
   // Init session state
   let agentId
@@ -269,6 +279,11 @@ async function runOnce({
       logger,
     })
   }
+  const traceSessionId = previousRun?.traceSessionId ?? crypto.randomUUID()
+
+  for (const toolName of COMPOSIO_META_TOOL_NAMES) {
+    delete sessionState.fileContext.customToolDefinitions[toolName]
+  }
 
   let resolve: (value: RunReturnType) => any = () => {}
   let _reject: (error: any) => any = () => {}
@@ -288,7 +303,7 @@ async function runOnce({
   // Comparing array identity detects progress more robustly than length:
   // context pruning could shrink history below its starting length without
   // meaning the runtime never ran.
-  const initialMessageHistory = sessionState.mainAgentState.messageHistory
+  let initialMessageHistory = sessionState.mainAgentState.messageHistory
 
   /** Calculates the current session state if cancelled.
    *
@@ -322,6 +337,7 @@ async function runOnce({
     message = message ?? 'Run cancelled by user.'
     return {
       sessionState: getCancelledSessionState(message),
+      traceSessionId,
       output: {
         type: 'error',
         message,
@@ -391,14 +407,15 @@ async function runOnce({
           mcpConfig,
         },
         overrides: overrideTools ?? {},
-        customToolDefinitions: customToolDefinitions
+        customToolDefinitions: activeCustomToolDefinitions
           ? Object.fromEntries(
-              customToolDefinitions.map((def) => [def.toolName, def]),
+              activeCustomToolDefinitions.map((def) => [def.toolName, def]),
             )
           : {},
         cwd,
         fs,
         env,
+        apiKey,
       })
     },
     requestMcpToolData: async ({ mcpConfig, toolNames }) => {
@@ -460,6 +477,7 @@ async function runOnce({
           resolve,
           onError,
           initialSessionState: sessionState,
+          traceSessionId,
         })
         return
       }
@@ -469,6 +487,7 @@ async function runOnce({
           resolve,
           onError,
           initialSessionState: sessionState,
+          traceSessionId,
         })
         return
       }
@@ -504,7 +523,6 @@ async function runOnce({
   if (!userInfo) {
     return getCancelledRunState('Invalid API key or user not found')
   }
-
   const userId = userInfo.id
 
   if (signal?.aborted) {
@@ -530,7 +548,10 @@ async function runOnce({
     repoId: undefined,
     clientSessionId: promptId,
     userId,
-    extraCodebuffMetadata,
+    extraCodebuffMetadata: {
+      ...(extraCodebuffMetadata ?? {}),
+      trace_session_id: traceSessionId,
+    },
     signal: signal ?? new AbortController().signal,
   }).catch((error) => {
     let errorMessage =
@@ -550,6 +571,7 @@ async function runOnce({
 
     resolve({
       sessionState: getCancelledSessionState(errorMessage),
+      traceSessionId,
       output: {
         type: 'error',
         message: errorMessage,
@@ -607,6 +629,7 @@ async function handleToolCall({
   cwd,
   fs,
   env,
+  apiKey,
 }: {
   action: ServerAction<'tool-call-request'>
   overrides: NonNullable<CodebuffClientOptions['overrideTools']>
@@ -614,6 +637,7 @@ async function handleToolCall({
   cwd?: string
   fs: CodebuffFileSystem
   env?: Record<string, string>
+  apiKey: string
 }): Promise<{ output: ToolResultOutput[] }> {
   const toolName = action.toolName
   const input = action.input
@@ -694,6 +718,8 @@ async function handleToolCall({
         cwd: path.resolve(resolvedCwd, input.cwd ?? '.'),
         env,
       } as Parameters<typeof runTerminalCommand>[0])
+    } else if (toolName === 'read_url') {
+      result = await readUrl(input as Parameters<typeof readUrl>[0])
     } else if (toolName === 'code_search') {
       result = await codeSearch({
         projectPath: requireCwd(cwd, 'code_search'),
@@ -722,12 +748,22 @@ async function handleToolCall({
           },
         },
       ]
+    } else if (isComposioMetaToolName(toolName)) {
+      result = await executeComposioToolViaServer({
+        apiKey,
+        toolName,
+        input,
+      })
     } else {
       throw new Error(
         `Tool not implemented in SDK. Please provide an override or modify your agent to not use this tool: ${toolName}`,
       )
     }
   } catch (error) {
+    if (isRunPauseError(error)) {
+      throw error
+    }
+
     result = [
       {
         type: 'json',
@@ -825,11 +861,13 @@ async function handlePromptResponse({
   resolve,
   onError,
   initialSessionState,
+  traceSessionId,
 }: {
   action: ServerAction<'prompt-response'> | ServerAction<'prompt-error'>
   resolve: (value: RunReturnType) => any
   onError: (error: { message: string }) => void
   initialSessionState: SessionState
+  traceSessionId: string
 }) {
   if (action.type === 'prompt-error') {
     onError({ message: action.message })
@@ -837,6 +875,7 @@ async function handlePromptResponse({
     const statusCode = extractStatusCodeFromMessage(action.message)
     resolve({
       sessionState: initialSessionState,
+      traceSessionId,
       output: {
         type: 'error',
         message: action.message,
@@ -856,6 +895,7 @@ async function handlePromptResponse({
       onError({ message })
       resolve({
         sessionState: initialSessionState,
+        traceSessionId,
         output: {
           type: 'error',
           message,
@@ -867,6 +907,7 @@ async function handlePromptResponse({
 
     const state: RunState = {
       sessionState,
+      traceSessionId,
       output: output ?? {
         type: 'error',
         message: 'No output from agent',
@@ -880,6 +921,7 @@ async function handlePromptResponse({
     })
     resolve({
       sessionState: initialSessionState,
+      traceSessionId,
       output: {
         type: 'error',
         message: 'Internal error: prompt response type not handled',

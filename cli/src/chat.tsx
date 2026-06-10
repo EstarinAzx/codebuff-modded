@@ -13,8 +13,9 @@ import { useShallow } from 'zustand/react/shallow'
 
 import { getAdsEnabled } from './commands/ads'
 import { routeUserPrompt, addBashMessageToHistory } from './commands/router'
-import { ChoiceAdBanner } from './components/choice-ad-banner'
+import { SingleAdBanner } from './components/ad-banner'
 import { ChatInputBar } from './components/chat-input-bar'
+import { FreebuffActiveSessionSummary } from './components/freebuff-active-session-summary'
 import { LoadPreviousButton } from './components/load-previous-button'
 import { ReviewScreen } from './components/review-screen'
 import { MessageWithAgents } from './components/message-with-agents'
@@ -174,10 +175,9 @@ export const Chat = ({
   })
   const hasSubscription = subscriptionData?.hasSubscription ?? false
 
-  const { ads, recordImpression } = useGravityAd({
+  const { ads, recordClick, recordImpression } = useGravityAd({
     enabled: IS_FREEBUFF || !hasSubscription,
     provider: 'gravity',
-    fallbackProvider: 'zeroclick',
   })
 
   // Set initial mode from CLI flag on mount
@@ -1416,6 +1416,9 @@ export const Chat = ({
         <TopBanner gitRoot={gitRoot} onSwitchToGitRoot={onSwitchToGitRoot} />
 
         {headerContent}
+        {IS_FREEBUFF && (
+          <FreebuffActiveSessionSummary session={freebuffSession} />
+        )}
         {hiddenMessageCount > 0 && (
           <LoadPreviousButton
             hiddenCount={hiddenMessageCount}
@@ -1466,8 +1469,12 @@ export const Chat = ({
           />
         )}
 
-        {ads && (IS_FREEBUFF || getAdsEnabled()) && (
-          <ChoiceAdBanner ads={ads} onImpression={recordImpression} />
+        {ads?.[0] && (IS_FREEBUFF || getAdsEnabled()) && (
+          <SingleAdBanner
+            ad={ads[0]}
+            onClick={recordClick}
+            onImpression={recordImpression}
+          />
         )}
 
         {reviewMode ? (

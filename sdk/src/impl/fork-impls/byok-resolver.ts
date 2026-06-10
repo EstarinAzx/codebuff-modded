@@ -18,10 +18,13 @@
  */
 
 import { createAnthropic } from '@ai-sdk/anthropic'
+// PORT: @codebuff/internal was deleted upstream (snapshot-only pivot). The
+// openai-compatible factory moved to the new @codebuff/llm-providers package —
+// same exports (OpenAICompatibleChatLanguageModel, VERSION), drop-in re-point.
 import {
   OpenAICompatibleChatLanguageModel,
   VERSION,
-} from '@codebuff/internal/openai-compatible/index'
+} from '@codebuff/llm-providers/openai-compatible'
 
 import { getValidCodexCredentials } from '../../codex-credentials'
 import { registerForkHooks } from '../fork-hooks'

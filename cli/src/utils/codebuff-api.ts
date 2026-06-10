@@ -1,5 +1,4 @@
 import { WEBSITE_URL } from '@codebuff/sdk'
-
 import type {
   PublishAgentsResponse,
 } from '@codebuff/common/types/api/agents/publish'
@@ -195,6 +194,55 @@ export interface CodebuffApiClient {
   feedback(req: FeedbackRequest): Promise<ApiResponse<FeedbackResponse>>
 }
 
+const TLS_CERTIFICATE_ERROR_CODES = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'CERT_HAS_EXPIRED',
+])
+
+function getTlsCertificateError(error: Error, depth = 0): Error | null {
+  const code =
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof error.code === 'string'
+      ? error.code
+      : undefined
+  const message = error.message.toLowerCase()
+  if (
+    (code && TLS_CERTIFICATE_ERROR_CODES.has(code)) ||
+    message.includes('self signed certificate') ||
+    message.includes('unable to verify the first certificate') ||
+    message.includes('certificate has expired') ||
+    message.includes('certificate verify failed')
+  ) {
+    return error
+  }
+
+  if (depth >= 2 || !(error.cause instanceof Error)) {
+    return null
+  }
+
+  return getTlsCertificateError(error.cause, depth + 1)
+}
+
+function formatNetworkErrorMessage(error: Error, method: string, url: string) {
+  const requestUrl = new URL(url)
+  const tlsCertificateError = getTlsCertificateError(error)
+
+  if (tlsCertificateError) {
+    return [
+      `TLS certificate verification failed for ${requestUrl.origin}.`,
+      'If your network intercepts HTTPS traffic, install its root certificate into your system trust store or use a network path that does not intercept TLS.',
+      `Original error: ${tlsCertificateError.message} (${method} ${url})`,
+    ].join(' ')
+  }
+
+  return `${error.message} (${method} ${url})`
+}
+
 /**
  * Sleep for a given duration
  */
@@ -227,6 +275,9 @@ const isRetryableError = (error: unknown): boolean => {
 
     // Don't retry abort errors - they indicate intentional cancellation
     if (name === 'aborterror') {
+      return false
+    }
+    if (getTlsCertificateError(error)) {
       return false
     }
 
@@ -392,7 +443,7 @@ export function createCodebuffApiClient(
         // Don't retry, throw the error with URL context
         if (error instanceof Error) {
           const enhancedError = new Error(
-            `${error.message} (${method} ${url})`,
+            formatNetworkErrorMessage(error, method, url),
           )
           enhancedError.name = error.name
           enhancedError.cause = error
