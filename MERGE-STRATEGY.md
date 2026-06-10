@@ -146,15 +146,72 @@ cbm
 # small prompt against your active profile → Path C dispatches
 ```
 
-### Step 6 — push and tag
+### Step 6 — release (manual; this is the full runbook, not a sketch)
 
+> ⚠️ **`bun run release` (`cli/scripts/release.ts`) does NOT work for the fork** — it dispatches a GitHub Actions workflow on upstream's private `CodebuffAI/freebuff-private`, which the fork can't reach. The fork release is **fully manual**, below.
+>
+> ⚠️ **Ordering is load-bearing.** The npm package is a ~9 kB launcher that downloads the platform binary from the fork's **GitHub Release** at install time (`cli/release/index.js` → `https://github.com/EstarinAzx/codebuff-modded/releases/download/v<ver>/codebuff-mod-<platform>-<arch>.tar.gz`). So the **GitHub release with binaries MUST exist before `npm publish`** — publish the launcher first and every `npm i -g codebuff-mod` 404s on the binary download.
+
+**6a. Bump version** (both files — the launcher version builds the download URL):
+```bash
+# edit cli/package.json + cli/release/package.json → same vX.Y.Z
+git add cli/package.json cli/release/package.json
+git commit -m "chore(release): bump to X.Y.Z — <one-line reason>"
+```
+Choose the bump by user impact on the CLI: new tools/models = minor; bugfix-only = patch. (Internal churn like a backend removal does not force a major because CLI behavior stays back-compatible.)
+
+**6b. Build all three platform binaries @ the new version** (the binary embeds `CODEBUFF_CLI_VERSION`, so rebuild AFTER the bump). win32 is the host (native); linux is cross-compiled via `OVERRIDE_*` env (bun cross-targets + fetches the per-platform OpenTUI native bundle from npm). Each build overwrites `cli/bin/codebuff-mod[.exe]`, so **package each tarball immediately after its build**. The tarball is the **binary only** (no wasm sibling — that matches every prior shipped release):
+```bash
+cd cli
+
+# win32-x64 (host)
+bun run build:binary
+./bin/codebuff-mod.exe --version                    # must print X.Y.Z
+tar -czf dist-binaries/codebuff-mod-win32-x64.tar.gz -C bin codebuff-mod.exe
+
+# linux-x64 (cross)
+OVERRIDE_TARGET=bun-linux-x64 OVERRIDE_PLATFORM=linux OVERRIDE_ARCH=x64 bun run build:binary
+tar -czf dist-binaries/codebuff-mod-linux-x64.tar.gz -C bin codebuff-mod
+
+# linux-arm64 (cross)
+OVERRIDE_TARGET=bun-linux-arm64 OVERRIDE_PLATFORM=linux OVERRIDE_ARCH=arm64 bun run build:binary
+tar -czf dist-binaries/codebuff-mod-linux-arm64.tar.gz -C bin codebuff-mod
+
+ls -la dist-binaries/*.tar.gz                        # 3 files, ~47-50 MB each
+cd ..
+```
+`cli/bin/` and `cli/dist-binaries/` are gitignored — these artifacts never enter git. (macOS targets `darwin-x64`/`darwin-arm64` exist in `build-binary.ts` but are deferred — not shipped.)
+
+**6c. Push branch + tag:**
 ```bash
 git push origin modded
-# bump cli/package.json + cli/release/package.json version, commit, then:
-git tag vX.Y.Z && git push origin vX.Y.Z
-gh release create vX.Y.Z --repo EstarinAzx/codebuff-modded dist-binaries/*.tar.gz
-cd cli/release && npm publish
+git tag -a vX.Y.Z -m "vX.Y.Z — <summary>"
+git push origin vX.Y.Z
 ```
+
+**6d. GitHub release WITH the three tarballs** (must precede publish):
+```bash
+gh release create vX.Y.Z --repo EstarinAzx/codebuff-modded \
+  --title "vX.Y.Z — <title>" --notes "<notes>" \
+  cli/dist-binaries/codebuff-mod-win32-x64.tar.gz \
+  cli/dist-binaries/codebuff-mod-linux-x64.tar.gz \
+  cli/dist-binaries/codebuff-mod-linux-arm64.tar.gz
+# verify all 3 assets attached (names must match cli/release/index.js PLATFORM_TARGETS):
+gh release view vX.Y.Z --repo EstarinAzx/codebuff-modded --json assets \
+  --jq '.assets[] | "\(.name)  \(.size)"'
+```
+
+**6e. npm publish** (last — irreversible; can't unpublish a version). Dry-run first to confirm it ships only the launcher (~5 files, no binaries) at the right version:
+```bash
+cd cli/release
+npm whoami                                           # must be an owner of codebuff-mod (tsd47216)
+npm publish --dry-run                                # expect codebuff-mod@X.Y.Z, 5 files, ~9 kB
+npm publish
+npm view codebuff-mod version dist-tags --json       # latest → X.Y.Z
+cd ../..
+```
+
+**6f. Post-ship:** update `.context/active-work.md` + `.context/overview.md` to the new version; run a live BYOK smoke on the published binary against a real provider (and ideally confirm a cross-compiled linux tarball actually runs on linux — it's built on Windows).
 
 ---
 
