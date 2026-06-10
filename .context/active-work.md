@@ -3,8 +3,8 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-06-11
 tags: [context, active-work]
-ship: 1.0.6 (shipped — opencode-go live model probe)
-focus: upstream-sync EXECUTED on branch sync-upstream-2026-06-11 (strategy B) — awaiting review → modded ff + release
+ship: 1.1.0 (SHIPPED — strategy-B upstream snapshot sync, BYOK-only, npm + GH release live)
+focus: nothing in flight — 1.1.0 shipped
 ---
 
 # Active Work
@@ -14,11 +14,13 @@ _At commit: `modded` tip `e534b0650` (docs/context sync; v1.0.6 shipped). Workin
 
 ## Current focus
 
-**Upstream-sync EXECUTED (2026-06-11), strategy B.** The snapshot-only
-upstream sync is merged + verified on branch
-`sync-upstream-2026-06-11` (`74948dc99`, 98 commits ahead of `modded`).
-`modded` itself is UNTOUCHED at `e534b0650` and nothing pushed —
-awaiting review before fast-forwarding `modded` and cutting a release.
+**SHIPPED v1.1.0 (2026-06-11), strategy B.** The snapshot-only upstream
+sync is merged, verified, and released. `modded` tip `b4ddf600b`
+(pushed). Tag `v1.1.0`. GitHub release
+https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.1.0 with
+three tarballs (win32-x64, linux-x64, linux-arm64). npm
+`codebuff-mod@1.1.0` live (`latest`). The throwaway sync branch was
+deleted after the ff. Backend (`web/`) removed — fork is BYOK-only.
 
 ### What changed upstream — snapshot-only pivot
 
@@ -109,10 +111,8 @@ too — verified nothing in the merged tree invokes it. See
 
 ## State
 
-- **In flight:** upstream-sync merge DONE + verified on branch
-  `sync-upstream-2026-06-11` (`74948dc99`). `modded` untouched
-  (`e534b0650`), nothing pushed. Next: review → ff `modded` → version
-  bump + release.
+- **In flight:** nothing. v1.1.0 shipped (modded `b4ddf600b`, tag
+  `v1.1.0`, GH release + npm live).
 - **Recently shipped — v1.0.6 (tag commit `3ce439802`):**
   - `cli/src/utils/providers-models.ts` — moved `opencode-go` out of
     the hardcoded `MODEL_CATALOG` (was `['opencode-go/glm-5']`, a
@@ -174,33 +174,17 @@ too — verified nothing in the merged tree invokes it. See
 
 ## Pick up here
 
-**Merge done + verified on `sync-upstream-2026-06-11`. To ship it:**
+Nothing required — 1.1.0 is out. Optional follow-ups:
 
-1. Run the live BYOK smoke on the new binary
-   (`cli/bin/codebuff-mod.exe`): `/providers:add <preset> <key>` →
-   `/providers:list` → small prompt. Confirm Path C dispatches.
-2. Review the sync branch diff if desired:
-   `git diff modded..sync-upstream-2026-06-11 -- sdk/ cli/ common/`
-   (the meaningful surface; ignore the mass `web/`+`packages/*`
-   deletions).
-3. Fast-forward `modded`:
-   `git switch modded && git merge --ff-only sync-upstream-2026-06-11`.
-4. FF local `main` to `origin/main` and push it (now safe — local main
-   was blocked earlier only by the uncommitted active-work.md edit):
-   `git switch main && git merge --ff-only origin/main && git push origin main`.
-5. Version bump + release per MERGE-STRATEGY.md §6 (bump
-   `cli/package.json` + `cli/release/package.json`, rebuild the three
-   platform tarballs, `git push origin modded`, tag, `gh release
-   create`, `npm publish`). This is a MAJOR sync (97 upstream commits +
-   backend removed) — consider a minor/major bump, not a patch.
-6. After ship, update MERGE-STRATEGY.md: the conflict map still assumes
-   the full monorepo (`web/_post.ts`, `packages/internal`, `scripts/
-   check-env-architecture.ts`). Post-B those zones are GONE — rewrite
-   the map for the lean CLI/SDK-only tree, or the next merge agent
-   chases dead files.
-
-**If review rejects strategy B:** the sync branch is disposable —
-`git branch -D sync-upstream-2026-06-11`, `modded` never moved.
+- **Live BYOK smoke on the published binary** — only validation not run
+  headless. `npm i -g codebuff-mod` (or let auto-update pull 1.1.0),
+  then `/providers:add <preset> <key>` → small prompt → confirm Path C
+  dispatches against a real provider. Verifies the cross-compiled
+  linux tarballs run on actual linux too.
+- **Fix the 2 stale CLI tests** (`providers-models.test.ts` opencode-go
+  catalog assertion; `providers.test.ts` schema-version assertion) —
+  both assert pre-1.0.6 behavior; not regressions.
+- **macOS binaries** still deferred (ships win32-x64 + linux-x64/arm64).
 
 ## Deferred — chase only if real merge pain returns
 
