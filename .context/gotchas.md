@@ -1,7 +1,7 @@
 ---
 type: gotchas
 project: codebuff (fork — modded branch)
-updated: 2026-05-22
+updated: 2026-06-11
 tags: [gotchas, shim]
 ---
 
@@ -25,31 +25,17 @@ Since v1.0.6, `opencode-go` has an **empty** `MODEL_CATALOG` entry → it live-p
 
 Catalog vs probe id shape: a **hardcoded** catalog id may carry a provider prefix (`opencode/minimax-m2.7`), but BYOK Path C (`createDirectProviderModel`) sends the model id **raw** to the endpoint, which wants the bare id (`minimax-m2.7`). Probe results from `data[].id` are already bare. So a prefixed hardcoded id is a latent dispatch bug; the probe path is correct by construction. v1.0.6 fixed this for opencode-go; the `opencode/` prefix on the Zen entries is the same unfixed trap.
 
-## LLM provider dispatch is a chained ternary
+## The web/ backend dispatch gotchas are GONE (strategy-B sync, 2026-06-11)
 
-`web/src/app/api/v1/chat/completions/_post.ts` has **two** parallel ladders — one for streaming, one for non-streaming. When adding a new provider, both must be wired or `/v1/chat/completions` will half-fail (most clients stream, so tests pass and non-stream callers silently break).
-
-Pattern per branch: add a `useXyz` boolean **and** thread `!useXyz` into every subsequent guard's `&&` chain **and** slot the handler into the ternary tower at the same position in both ladders.
-
-## Pricing missing → 500
-
-Every routable model needs `inputCostPerToken / cachedInputCostPerToken / outputCostPerToken` in its provider handler's pricing map. Missing pricing throws at billing finalization and the user sees a 500.
-
-## Provider label tagged in two places per handler
-
-Each `handle*NonStream` and `handle*Stream` pair tags `data.provider`. The non-stream handler tags once at the end; the stream handler tags inside `handleLine`. Miss one and BigQuery analytics mis-attributes traffic to the wrong provider.
-
-## Free-mode (freebuff) gates are layered
-
-Free-mode requests pass through: country classification → agent+model allowlist → session/waiting-room gate → rate limiter. Each gate has its own error code (see `STATUS_BY_GATE_CODE` in `_post.ts`). Never bypass — there are real attack scenarios documented inline (e.g. "free Opus for attacker, real dollars for us").
+Four former gotchas lived in `web/src/app/api/v1/chat/completions/_post.ts` — the chained-ternary provider dispatch (streaming + non-streaming ladders), pricing-map-missing→500, per-handler provider-label tagging, and layered free-mode gates. **`web/` was deleted in the strategy-B sync.** The fork is BYOK-only: all dispatch goes through SDK Path C (`sdk/src/impl/fork-impls/byok-resolver.ts createDirectProviderModel`) straight to the provider, no `_post.ts` ladder, no billing/BigQuery hop. If you ever re-add a backend, recover these from git history at `e534b0650`.
 
 ## `OPENCODE_API_KEY` is shared between Zen and Go endpoints
 
-One env var serves both. If you later need separate keys per endpoint, add `OPENCODE_GO_API_KEY` to `packages/internal/src/env-schema.ts` in both the schema block and `serverProcessEnv`.
+One env var serves both. It now lives ONLY in `common/src/env-schema.ts` (the server-side `packages/internal/src/env-schema.ts` was deleted with `packages/internal`). If you later need separate keys per endpoint, add `OPENCODE_GO_API_KEY` to the `common/` schema.
 
-## Windows + bun workspaces
+## Verify per-package — there is NO root aggregate typecheck/test
 
-Workspace install + typecheck both run from repo root (`bun install`, `bun run typecheck`). Do not run them per-package — the `--filter='*'` script depends on workspace resolution from root.
+Upstream's lean snapshot root `package.json` dropped the `typecheck` and `test` aggregate scripts. `bun run typecheck` / `bun run test` from root now error `Script not found`. Run per package instead: `(cd cli && bun run typecheck)`, same for `sdk` and `common`; tests via `(cd sdk && bun test)` etc. `bun install` still runs from root (workspace resolution). (This inverts the pre-strategy-B "run from root only" rule.)
 
 ## bun `--compile` chokes on spaced project paths
 

@@ -1,7 +1,7 @@
 ---
 type: stack
 project: codebuff (fork — modded branch)
-updated: 2026-05-19
+updated: 2026-06-11
 tags: [stack, tooling, byok]
 ---
 
@@ -15,59 +15,46 @@ tags: [stack, tooling, byok]
 
 ## Frameworks
 
-- **Next.js** — `web/` app + API routes (the proxy backend)
-- **OpenTUI + React** — `cli/` TUI
-- **undici** `Agent` — long-lived HTTP dispatcher for upstream LLM streams
-- **Zod v4** — env schema + request validation
-- **Drizzle** — see `packages/internal/db:*` scripts
+- **OpenTUI + React** — `cli/` TUI (the only shipped surface)
+- **Zod v4** — env schema + request validation (`common/src/env-schema.ts`)
+- **Vercel AI SDK** (`@ai-sdk/*`) + vendored **`@codebuff/llm-providers`** (`openai-compatible` factory) — the model-call plumbing SDK Path C dispatches through
+- ~~Next.js / undici / Drizzle~~ — gone with `web/` + `packages/internal` in the strategy-B sync (2026-06-11)
 
 ## External services
 
-Upstream (only reachable when `CODEBUFF_USE_BACKEND=1` is set OR no BYOK profile is active):
+The fork is **BYOK-only** — no codebuff.com backend in-repo. The only network calls are the user's own provider key against their endpoint:
 
-- **LLM providers** — Anthropic, OpenAI, Gemini (via OpenRouter), DeepSeek, Fireworks, Moonshot, CanopyWave, SiliconFlow, OpenCode Zen, OpenCode Go (fork-added — see [[active-work]])
-- **Stripe** — credit billing
-- **BigQuery** — usage/audit telemetry
-- **PostHog** — analytics
-- **Discord / GitHub / Loops** — auth + email + bot integrations
-- **ipinfo** — geo classification for free-mode
-
-BYOK (default for `codebuff-mod` CLI, post-rip):
-
-- User's own provider key against any of the 11 presets in `cli/src/utils/providers.ts` — openai, anthropic, openrouter, opencode, opencode-go, deepseek, gemini, mistral, together, groq, custom-openai
-- Direct HTTP via SDK Path C (`sdk/src/impl/model-provider.ts createDirectProviderModel`) — no codebuff.com hop
+- User's own provider key against any preset in `cli/src/utils/providers.ts` — openai, anthropic, openrouter, opencode, opencode-go, deepseek, gemini, mistral, together, groq, custom-openai
+- Direct HTTP via SDK Path C (`sdk/src/impl/fork-impls/byok-resolver.ts createDirectProviderModel`) — no codebuff.com hop
 - No central billing, analytics, or auth — `~/.config/manicode/providers.json` (chmod 0600) is the only state
+
+SDK Path B (`CODEBUFF_USE_BACKEND=1`, in `sdk/src/impl/database.ts`) still exists for external SDK consumers but targets a *remote* codebuff.com — the fork no longer hosts Stripe/BigQuery/PostHog/auth. Those services are upstream's, not in this tree.
 
 ## Workspaces
 
-`.agents`, `common`, `web`, `freebuff`, `freebuff/web`, `packages/*`, `scripts`, `evals`, `sdk`, `agents`, `cli`
+`agents`, `cli`, `common`, `evals`, `freebuff`, `packages/agent-runtime`, `packages/code-map`, `packages/llm-providers`, `scripts/tmux`, `sdk` (matches upstream's lean snapshot — `web`, `freebuff/web`, `packages/{internal,billing,bigquery,build-tools}`, `.agents`, full `scripts` all dropped in strategy B; fork `.agents/mod-*.ts` survive as non-workspace files bundled by prebuild)
 
 ## Commands
 
 | Action | Command |
 |---|---|
-| Install | `bun install` |
+| Install | `bun install` (from root — workspace resolution) |
 | Dev (cli) | `bun dev` (alias for `bun start-cli`) |
-| Dev (web) | `bun start-web` (boots DB first) |
-| Typecheck (all) | `bun run typecheck` |
-| Test | `bun run test` |
-| Format | `bun run format` |
-| Stop services | `bun down` |
-| Clean TS artifacts | `bun run clean-ts` |
-| Build CLI binary (native) | `cd cli && bun run build:binary` |
-| Build CLI binary (cross) | `OVERRIDE_TARGET=bun-linux-x64 OVERRIDE_PLATFORM=linux OVERRIDE_ARCH=x64 bun run build:binary` (see [[gotchas]] for spaced-path workaround) |
-| Publish launcher | `cd cli/release && npm publish` |
-| Tag + release binaries | `git tag vX.Y.Z && git push origin vX.Y.Z && gh release create vX.Y.Z --repo EstarinAzx/codebuff-modded dist-binaries/*.tar.gz` (manual tar from `cli/bin/` — build script does NOT auto-tar; see [[gotchas]]) |
+| Typecheck | **per package** — `(cd cli && bun run typecheck)`, same for `sdk`, `common`. NO root aggregate (dropped in strategy-B sync; see [[gotchas]]) |
+| Test | **per package** — `(cd sdk && bun test)`, `(cd cli && bun test)`, `(cd common && bun test)` |
+| Build CLI binary (native win32) | `cd cli && bun run build:binary` |
+| Build CLI binary (cross linux) | `OVERRIDE_TARGET=bun-linux-x64 OVERRIDE_PLATFORM=linux OVERRIDE_ARCH=x64 bun run build:binary` (see [[gotchas]] for spaced-path / tar workarounds) |
+| Full release (bump→build→tag→GH→npm) | follow [MERGE-STRATEGY.md](../MERGE-STRATEGY.md) §Step 6 — the complete runbook (GH release MUST precede `npm publish`) |
 
 ## Key paths
 
-Upstream surface (mostly dead in BYOK mode):
+Shared surface (survives in the lean tree):
 
-- LLM provider handlers — `web/src/llm-api/*.ts` (one file per upstream)
-- Chat-completions dispatch — `web/src/app/api/v1/chat/completions/_post.ts`
 - Model catalog (whitelist) — `common/src/constants/model-config.ts`
-- Env schema — `packages/internal/src/env-schema.ts` (server) and `common/src/env-schema.ts` (client)
+- Codex OAuth model map (single source of truth) — `common/src/constants/chatgpt-oauth.ts`
+- Env schema — `common/src/env-schema.ts` (the server-side `packages/internal` schema was deleted)
 - Agent templates — `agents/` (bundled at build time) + `.agents/` (loaded at runtime)
+- Model-call plumbing — `packages/llm-providers/src/openai-compatible/` (vendored from upstream; SDK Path C imports it)
 
 BYOK fork additions (`modded` branch):
 
@@ -91,5 +78,12 @@ Hook registry + fork-impls (added 1.0.3 shim refactor):
 - CLI impls:
   - `cli/scripts/fork-impls/scan-mod-agents.ts` — `.agents/mod-*` bundle scan.
   - `cli/src/fork-impls/preset-add-handlers.ts` — codex async `/providers:add` handler.
-- Web impl:
-  - `web/src/fork-impls/provider-dispatch.ts` — opencode-go provider override hook.
+- ~~Web impl~~ — `web/src/fork-impls/provider-dispatch.ts` (opencode-go backend override) was deleted in the strategy-B sync. opencode-go now dispatches via BYOK Path C only.
+
+## Related
+
+- [[overview]]
+- [[active-work]]
+- [[decisions]]
+- [[gotchas]]
+- [MERGE-STRATEGY.md](../MERGE-STRATEGY.md)
