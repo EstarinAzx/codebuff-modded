@@ -236,6 +236,8 @@ Registry types: `sdk/src/impl/fork-hooks.ts`. Implementations (zero-conflict —
 - `sdk/src/impl/fork-impls/runid-synth.ts` — `forkAwareStartAgentRun` BYOK runId synthesis.
 - `cli/scripts/fork-impls/scan-mod-agents.ts` — `.agents/mod-*` bundle scan.
 - `cli/src/fork-impls/preset-add-handlers.ts` — codex async `/providers:add` handler.
+- `packages/agent-runtime/src/llm-api/fork-impls/byok-web-tools.ts` — BYOK direct dispatch for `web_search`/`read_docs` (`isBackendConfigured`, `byokWebSearch`, `byokReadDocs`, `gateByokWebTools`).
+- `packages/agent-runtime/src/llm-api/fork-impls/search-providers.ts` — serper/brave/tavily search clients + fallback chain (`searchWithFallback`, `availableSearchProviders`, `CBM_SEARCH_PROVIDER` preference).
 
 CLI-side boot registration (`setActiveByokProfile` + `setByokAgentBindings`) happens in `cli/src/init/init-app.ts`. If a hook registration is dropped (bun-compile tree-shaking has bitten this — see React-hooks note), behavior silently falls back to upstream verbatim.
 
@@ -278,6 +280,22 @@ grep -c "^\s*'[^']*':" common/src/constants/chatgpt-oauth.ts   # expect >= 22
 **Resolve:** keep codex flowing through the same orchestrator every preset uses; keep `opencode-go` empty (probes `https://opencode.ai/zen/go/v1/models`).
 ```bash
 grep -n "fetchCodexModelsFromEndpoint" cli/src/utils/providers-models.ts   # ZERO hits
+```
+
+#### Web-tools direct dispatch surface (since the web_search/read_docs rewire)
+
+Six upstream files carry small fork edits so `web_search`/`read_docs` work without the deleted backend (BYOK dispatch lives in `fork-impls/` — zero-conflict — but these call sites are merge surface):
+
+- `packages/agent-runtime/src/llm-api/codebuff-web-api.ts` — `callWebSearchAPI` + `callDocsSearchAPI` each open with an `if (!isBackendConfigured(...)) return byok...(...)` block. **Resolve:** keep both blocks at function top; upstream body below unchanged.
+- `packages/agent-runtime/src/llm-api/context7-api.ts` — `context7AuthHeaders()` helper; Authorization sent only when `CONTEXT7_API_KEY` exists (upstream sends `Bearer undefined` keyless). **Resolve:** keep conditional headers at both fetch sites.
+- `packages/agent-runtime/src/templates/agent-registry.ts` — `assembleLocalAgentTemplates` takes optional `ciEnv` and pipes templates through `gateByokWebTools`. **Resolve:** keep param + gate call.
+- `packages/agent-runtime/src/main-prompt.ts` — passes `ciEnv: params.ciEnv` into `assembleLocalAgentTemplates`. One line.
+- `common/src/types/contracts/env.ts` + `common/src/env-ci.ts` — `SERPER_API_KEY`, `BRAVE_API_KEY`, `TAVILY_API_KEY`, `CBM_SEARCH_PROVIDER` on `CiEnv`/`getCiEnv`. **Resolve:** union with upstream additions.
+- `common/src/testing/fixtures/agent-runtime.ts` — `testCiEnv.SERPER_API_KEY` keeps `web_search` advertised under the gate; removing it breaks the web-search/read-docs tool tests non-obviously.
+
+Also fork-rewired tests: `packages/agent-runtime/src/__tests__/{web-search-tool,read-docs-tool}.test.ts` import `testResearcherAgent` from `./test-utils` (upstream imported the deleted `agents-graveyard/researcher`). If upstream resurrects those test files, keep the fixture import.
+```bash
+grep -n "isBackendConfigured" packages/agent-runtime/src/llm-api/codebuff-web-api.ts   # expect 2 dispatch blocks
 ```
 
 #### `cli/src/commands/providers.ts` — codex add path + unified `/model`

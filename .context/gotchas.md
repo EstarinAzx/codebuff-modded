@@ -109,6 +109,12 @@ tar -czf "$dist\codebuff-mod-win32-x64.tar.gz" codebuff-mod.exe
 
 Cross-compile order matters: each `OVERRIDE_TARGET=bun-linux-*` build overwrites `cli/bin/codebuff-mod`. Tar each before kicking off the next. Win32 is safe because the output filename is `.exe` and doesn't collide.
 
+## `testCiEnv.SERPER_API_KEY` is load-bearing for tool tests
+
+The BYOK gate (`gateByokWebTools`, applied in `assembleLocalAgentTemplates`) strips `web_search` from agent templates whenever the supplied `ciEnv` has no search key. `common/src/testing/fixtures/agent-runtime.ts` therefore carries `SERPER_API_KEY: 'test-serper-key'` in `testCiEnv` — remove it and `web-search-tool.test.ts` fails non-obviously (the mocked stream still emits the tool call, but the executor rejects it as not-in-template). Same trap for any new test that assembles templates with a custom `ciEnv: {}` and expects `web_search` present.
+
+Related runtime trap: the gate checks key **presence**, not quota. A dead-quota Serper key keeps `web_search` advertised; each call fails fast (~1s) with a clear per-provider error from `searchWithFallback`, but the agent may retry. Unset the env var to silence the tool entirely.
+
 ## OpenTUI transparent cells don't repaint — content behind bleeds through
 
 OpenTUI elements with `backgroundColor: 'transparent'` (the codebase default — `theme.background` itself is `'transparent'` so the app rides the terminal bg) only paint cells their glyphs cover. Any cell a component does NOT paint keeps whatever the framebuffer already held — stale rows from earlier frames, borders of elements behind it. Symptom: a colored line "bleeding through" the gaps of foreground text (v1.1.1 bug: yellow separator line through the chat input placeholder row).

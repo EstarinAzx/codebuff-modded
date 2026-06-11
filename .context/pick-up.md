@@ -5,40 +5,44 @@ this file). Project is the BYOK Codebuff fork, `modded` branch.
 
 ## What the last session finished
 
-**Shipped v1.1.1 + v1.1.2 same day** — TUI input-box bleed-through saga:
+**Web-tools rewire** — `web_search` + `read_docs` no longer dial the
+deleted backend:
 
-- v1.1.1: stale framebuffer content (yellow line) showed through the chat
-  input box; fixed with opaque `#000000` fill (`0d5a84979`).
-- v1.1.2: replaced hardcoded black with the terminal's OWN background
-  color via OSC 11 query — new hook
-  `cli/src/hooks/use-terminal-background.ts` (`renderer.getPalette()`,
-  black fallback). Opaque but visually invisible on any terminal theme.
-  askUser questions box painted too (`230fd309c`).
-- npm `codebuff-mod@1.1.2` live (`latest`); GH release v1.1.2 with 3
-  tarballs. `modded` + tags pushed. Root cause documented in
-  `.context/gotchas.md` "OpenTUI transparent cells don't repaint".
+- `web_search` → direct serper→brave→tavily fallback chain
+  (`packages/agent-runtime/src/llm-api/fork-impls/search-providers.ts`);
+  any of `SERPER_API_KEY`/`BRAVE_API_KEY`/`TAVILY_API_KEY` enables it,
+  `CBM_SEARCH_PROVIDER` picks primary. No key → tool stripped from agent
+  templates (`gateByokWebTools`).
+- `read_docs` → direct Context7, keyless (fixed `Bearer undefined` bug).
+- Facade seam: dispatch blocks at top of `callWebSearchAPI`/
+  `callDocsSearchAPI` in `codebuff-web-api.ts`; backend-configured path
+  untouched (SDK Path B).
+- Also: fixed the 2 stale CLI provider tests; revived 2 import-broken
+  agent-runtime tool test files.
+- User live-smoked the Serper path (worked). Brave/Tavily chain
+  unit-tested only.
+- Rationale: [[decisions]] same-date entry. Merge surface:
+  MERGE-STRATEGY.md "Web-tools direct dispatch surface".
 
 ## Next task
 
-**Nothing required — 1.1.2 is out.** Optional, pick any:
+**Finish the ship step.** Code committed on `modded`; remaining:
 
-1. **Live BYOK smoke on published binary** (carried since 1.1.0, still
-   unrun): `npm i -g codebuff-mod` → `/providers:add <preset> <key>` →
-   small prompt → confirm Path C dispatches. Also validates linux
-   tarballs on real linux.
-2. **Fix 2 stale CLI tests** (`providers-models.test.ts` opencode-go
-   catalog, `providers.test.ts` schema version — assert pre-1.0.6
-   behavior, not regressions).
+1. Push `modded` (if last session didn't — check `git status -sb`).
+2. User call on release: push-only vs full **1.2.0** (bump version →
+   binaries win32-x64 + linux-x64 + linux-arm64 → tar → GH release →
+   npm publish, in THAT order — MERGE-STRATEGY §Step 6 runbook).
 
 ## Landmines / notes
 
-- **OSC 11 first-paint flash** — first frame black, snaps to detected
-  color. Cosmetic; fix only if user complains.
-- **`chat-input-bar.tsx` now carries fork-local edits** (bg fill + hook
-  import) — expect a trivial conflict on the next upstream sync.
-- **CLI test suite not re-run for 1.1.1/1.1.2** (UI-only changes;
-  typecheck green, user eyeballed both via `bun run dev`).
-- **Next upstream sync:** follow `MERGE-STRATEGY.md` as-is. Never import
-  `@codebuff/internal` (deleted) — use `@codebuff/llm-providers` +
-  `@codebuff/common`.
+- **`testCiEnv.SERPER_API_KEY` is load-bearing** — removing it breaks
+  web-search tool tests via the gate. See [[gotchas]].
+- **Gate checks key presence, not quota** — dead key keeps tool
+  advertised; calls fail fast with clear error.
+- **Test rot is wider than documented before:** common 1 / sdk 65 /
+  cli 18 pre-existing fails (Windows path-flavored), stash-baselined
+  2026-06-11. Don't chase as regressions.
+- **Brave/Tavily API shapes from training data** — if a live call 4xx's,
+  check current docs; clients degrade clean (null → next provider).
+- User's Serper key was pasted in-chat; advised rotation (low stakes).
 - Full state in `active-work.md`; strategy rationale in `decisions.md`.

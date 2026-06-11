@@ -1,13 +1,21 @@
 ---
 type: decisions
 project: codebuff (fork — modded branch)
-updated: 2026-05-22
+updated: 2026-06-11
 tags: [decisions, modded]
 ---
 
 # Decisions — fork-local
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
+
+## 2026-06-11 — web_search/read_docs go direct-to-provider at the facade seam, with advertisement gating
+
+**Decision:** Rewire the two backend-proxied web tools inside `codebuff-web-api.ts` (the facade), not the tool handlers: when no real backend is configured (`isBackendConfigured` = non-sentinel `NEXT_PUBLIC_CODEBUFF_APP_URL` + `CODEBUFF_API_KEY`), `callWebSearchAPI` dispatches to a serper→brave→tavily fallback chain (`fork-impls/search-providers.ts`, keys `SERPER_API_KEY`/`BRAVE_API_KEY`/`TAVILY_API_KEY`, primary picked by `CBM_SEARCH_PROVIDER`) and `callDocsSearchAPI` calls Context7 directly (keyless). Additionally, `assembleLocalAgentTemplates` strips `web_search` from every agent's `toolNames` when zero search keys exist (`gateByokWebTools`), so agents never advertise a tool that can only fail. `read_docs` is never stripped.
+
+**Why:** Both tools were upstream backend-proxies (server held the Serper/Context7 keys, billed credits); the v1.1.0 BYOK rip deleted that backend but left the tools dialing the sentinel `http://127.0.0.1:1` — `web_search` died with "Unable to connect" after retry-backoff, `read_docs` with "Missing Codebuff base URL or API key". Facade seam chosen over handler rewrites because the handler tests spy on the facade module (zero test churn) and the edit surface is two early-return blocks instead of two function bodies. Upstream's own orphaned direct clients (`serper-api.ts`, `context7-api.ts` — left behind when search moved server-side) do the actual work. Backend-first priority preserves SDK Path B for external consumers. Gating at template assembly (not in the prompt builder) because prompt, stream-parser, and tool-executor all read the same template object — one strip covers all three. Also enforces the env-schema contract comment ("any network request reaching the sentinel is a bug") for these endpoints.
+
+**Reversibility:** easy — delete the two dispatch blocks in `codebuff-web-api.ts`, the gate call in `agent-registry.ts`, and `fork-impls/{byok-web-tools,search-providers}.ts`; behavior reverts to upstream proxy-only. The `CiEnv` key additions are inert without them.
 
 ## 2026-06-11 — Ride upstream's snapshot deletion to a BYOK-only fork (strategy B)
 

@@ -22,10 +22,11 @@ tags: [stack, tooling, byok]
 
 ## External services
 
-The fork is **BYOK-only** — no codebuff.com backend in-repo. The only network calls are the user's own provider key against their endpoint:
+The fork is **BYOK-only** — no codebuff.com backend in-repo. The only network calls are the user's own keys against their endpoints:
 
 - User's own provider key against any preset in `cli/src/utils/providers.ts` — openai, anthropic, openrouter, opencode, opencode-go, deepseek, gemini, mistral, together, groq, custom-openai
 - Direct HTTP via SDK Path C (`sdk/src/impl/fork-impls/byok-resolver.ts createDirectProviderModel`) — no codebuff.com hop
+- **Web tools (since the web_search rewire):** `web_search` → serper.dev / brave / tavily direct (env keys `SERPER_API_KEY` / `BRAVE_API_KEY` / `TAVILY_API_KEY`, primary via `CBM_SEARCH_PROVIDER`, fallback chain); `read_docs` → context7.com direct (keyless; optional `CONTEXT7_API_KEY`). No key → `web_search` un-advertised via template gate.
 - No central billing, analytics, or auth — `~/.config/manicode/providers.json` (chmod 0600) is the only state
 
 SDK Path B (`CODEBUFF_USE_BACKEND=1`, in `sdk/src/impl/database.ts`) still exists for external SDK consumers but targets a *remote* codebuff.com — the fork no longer hosts Stripe/BigQuery/PostHog/auth. Those services are upstream's, not in this tree.
@@ -75,6 +76,9 @@ Hook registry + fork-impls (added 1.0.3 shim refactor):
   - `sdk/src/impl/fork-impls/byok-resolver.ts` — Path C resolution (raw-key + codex OAuth), per-agent binding lookup, `BYOKProfile`-to-LanguageModel.
   - `sdk/src/impl/fork-impls/backend-skip.ts` — `shouldSkipBackend()` + synthetic-user fallback.
   - `sdk/src/impl/fork-impls/runid-synth.ts` — `forkAwareStartAgentRun` wrap (BYOK runId UUID synth — keeps `run-agent-step.ts` byte-identical to upstream).
+- Agent-runtime impls (web-tools rewire):
+  - `packages/agent-runtime/src/llm-api/fork-impls/byok-web-tools.ts` — BYOK dispatch for `web_search`/`read_docs` + `gateByokWebTools` template gate.
+  - `packages/agent-runtime/src/llm-api/fork-impls/search-providers.ts` — serper/brave/tavily clients + fallback chain.
 - CLI impls:
   - `cli/scripts/fork-impls/scan-mod-agents.ts` — `.agents/mod-*` bundle scan.
   - `cli/src/fork-impls/preset-add-handlers.ts` — codex async `/providers:add` handler.

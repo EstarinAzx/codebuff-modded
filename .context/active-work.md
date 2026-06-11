@@ -3,123 +3,123 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-06-11
 tags: [context, active-work]
-ship: 1.1.2 (SHIPPED — input box blends with terminal bg via OSC 11; npm + GH release live)
-focus: nothing in flight — 1.1.2 shipped
+ship: web-tools rewire (web_search/read_docs BYOK-direct) — committed, release pending user call
+focus: shipping the web-tools rewire (1.2.0?)
 ---
 
 # Active Work
 
 _Last updated: 2026-06-11 by Fable 5 (auto)_
-_At commit: `modded` tip `4d9e48f40` (the 1.1.2 bump; `v1.1.2` tag) + this context commit — pushed. Working tree clean (untracked `.codeboarding/` only)._
+_At commit: see `git log` — web-tools rewire committed on `modded` after `4d9e48f40` (the 1.1.2 bump). Push/release state: see [[#Pick up here]]._
 
 ## Current focus
 
-**Nothing in flight. SHIPPED v1.1.2 (2026-06-11)** — same-day follow-up to
-v1.1.1. 1.1.1 fixed TUI bleed-through with a hardcoded black input-box
-fill; 1.1.2 replaces that with the terminal's own background color queried
-once via OSC 11 (`cli/src/hooks/use-terminal-background.ts` →
-`renderer.getPalette()`, `#000000` fallback). Box stays opaque (required —
-see [[gotchas]] "OpenTUI transparent cells don't repaint") but blends
-invisibly with any terminal theme. askUser questions box painted too
-(same bleed risk). Commits: `230fd309c` (feat), `4d9e48f40` (bump).
+**Web-tools rewire (2026-06-11, same day as 1.1.2).** `web_search` and
+`read_docs` were backend-proxied upstream tools still dialing the deleted
+backend (sentinel `http://127.0.0.1:1`) — `web_search` failed "Unable to
+connect", `read_docs` "missing API key". Now BYOK-direct:
 
-v1.1.0 (strategy-B BYOK-only sync) context unchanged — rationale in
-[[decisions]], merge+release mechanics in
-[MERGE-STRATEGY.md](../MERGE-STRATEGY.md).
+- **Facade dispatch** in `codebuff-web-api.ts`: backend configured
+  (non-sentinel URL + `CODEBUFF_API_KEY`) → upstream proxy path (Path B
+  preserved); else direct.
+- **`web_search`** → serper→brave→tavily fallback chain
+  (`fork-impls/search-providers.ts`); keys `SERPER_API_KEY` /
+  `BRAVE_API_KEY` / `TAVILY_API_KEY`; `CBM_SEARCH_PROVIDER` picks primary.
+  0 credits.
+- **`read_docs`** → Context7 direct, keyless (fixed upstream
+  `Bearer undefined` header bug in `context7-api.ts`).
+- **Advertisement gate** (`gateByokWebTools` via
+  `assembleLocalAgentTemplates` ← `main-prompt.ts`): zero search keys →
+  `web_search` stripped from all agent templates; `read_docs` always stays.
+- Full rationale in [[decisions]] "web_search/read_docs go
+  direct-to-provider"; merge surface documented in
+  [MERGE-STRATEGY.md](../MERGE-STRATEGY.md) "Web-tools direct dispatch
+  surface".
+
+Also this session: fixed the 2 stale CLI tests (`providers-models.test.ts`
+opencode-go now asserts empty catalog; `providers.test.ts` asserts schema
+v2) and revived 2 import-broken agent-runtime test files
+(`web-search-tool.test.ts`, `read-docs-tool.test.ts` — dead
+`agents-graveyard` import → `testResearcherAgent` fixture in test-utils).
 
 ## State
 
-- **In flight:** nothing.
-- **modded:** `v1.1.2` tag at `4d9e48f40`, pushed to `origin/modded`.
-- **Release artifacts (v1.1.2):**
-  - npm `codebuff-mod@1.1.2` live (`latest`), 9.4 kB launcher.
-  - GitHub release
-    https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.1.2
-    — three tarballs: win32-x64, linux-x64, linux-arm64 (~47–50 MB),
-    assets verified against `cli/release/index.js` PLATFORM_TARGETS.
-  - `cli/bin/` + `cli/dist-binaries/` hold the 1.1.2 builds (gitignored).
-- **Verify at ship (1.1.2):** cli typecheck green; win32 binary prints
-  `1.1.2`; user eyeballed terminal-bg blend via `bun run dev` (gate
-  passed). CLI test suite NOT re-run (UI-only change; the 2 known-stale
-  `providers*` fails from 1.1.0 still stand — see below).
-- **Branches/tags:** unchanged — `modded-pre-shim` (v1.0.2 archive),
-  pre-sync tip `e534b0650` (backend-restore source), `upstream` remote →
-  `CodebuffAI/codebuff`.
+- **In flight:** ship step — push `modded`, then user decides full 1.2.0
+  release (npm + GH tarballs) vs push-only.
+- **Verified:** agent-runtime 451 pass / 0 fail (18 new tests: 8 facade,
+  11 provider-chain/gating, plus revived files); typecheck green in
+  common / agent-runtime / sdk / cli; common+sdk+cli failures
+  stash-baselined as pre-existing (1 / 65 / 18 — see below).
+- **Live smoke:** user tested Serper path end-to-end via `bun run dev`
+  (key set, real search worked). Brave/Tavily + fallback chain are
+  unit-tested only — no live key.
+- **Version:** still 1.1.2 — no bump committed yet.
+- **Branches/tags:** unchanged (`modded-pre-shim`, pre-sync tip
+  `e534b0650`, `upstream` remote).
 - **Blocked:** none.
 
 ## Pick up here
 
-Nothing required — 1.1.2 is out. Optional follow-ups:
+1. **Ship:** push `modded`; if user wants a release, bump 1.2.0 and follow
+   MERGE-STRATEGY §Step 6 (build win32 + 2 linux binaries, tar, GH release
+   BEFORE npm publish).
+2. **Optional live smoke for fallback:** needs a Brave or Tavily key —
+   set both that key and a deliberately-bad `SERPER_API_KEY`, confirm
+   chain falls through.
+3. **Carried:** live BYOK smoke on published binary (since 1.1.0); OSC 11
+   first-paint flash (cosmetic).
 
-- **Live BYOK smoke on the published binary** (carried since 1.1.0, still
-  unrun): `npm i -g codebuff-mod` → `/providers:add <preset> <key>` →
-  small prompt → confirm Path C dispatches. Also confirms cross-compiled
-  linux tarballs run on actual linux (built on Windows).
-- **Fix the 2 stale CLI tests** — `providers-models.test.ts` asserts
-  `MODEL_CATALOG['opencode-go'].length > 0` (false since v1.0.6) and
-  `providers.test.ts` asserts schema `version === 1` (fork is on v2/v3).
-- **OSC 11 first-paint flash (cosmetic, only if user complains):** first
-  frame renders the black fallback, snaps to detected color when the
-  query answers. Fix would hold initial paint until palette resolves.
-- **Next upstream sync** — follow MERGE-STRATEGY.md as-is (turnkey).
-  Note: `chat-input-bar.tsx` now carries fork-local edits (bg fill + the
-  use-terminal-background import) — expect a trivial conflict there on
-  the next sync.
+## Known test-suite rot (pre-existing, stash-baselined 2026-06-11)
+
+- `common`: 1 fail (`coerceToArray` zod JSON-schema comparison).
+- `sdk`: 65 fails — filesystem/path-flavored suites (getFiles,
+  loadUserKnowledgeFiles, applyPatchTool, changeFile, …) on Windows.
+- `cli`: 18 fails + 4 errors, same flavor.
+- None caused by this session's work (verified by stashing). Wider than
+  the "2 stale tests" previously documented — those 2 are now fixed.
 
 ## Deferred — chase only if it surfaces
 
-- **`opencode` (Zen) preset still hardcoded.** v1.0.6 fixed only
-  `opencode-go`. The sibling `opencode` Zen preset keeps its 2-id
-  hardcoded catalog (`['opencode/minimax-m2.7', 'opencode/kimi-k2.6']`)
-  with the same `opencode/`-prefix bug — endpoint
-  (`https://opencode.ai/zen/v1/models`) live-serves ~40 ids. One-line
-  fix mirroring v1.0.6 if a user reports it.
-- **3 un-shimmed React hooks.** `use-connection-status`,
-  `use-gravity-ad`, `use-agent-validation` still hold in-place
-  `BYOK_AT_BOOT` logic (bun-compile tree-shook the shim — see
-  [[gotchas]] "Fork-hook registration silently no-ops if tree-shaken").
-- **`ForkHooks.shouldSkipReactHook` dead field.** ~10 lines to remove.
-- **macOS binaries** (`darwin-x64`/`darwin-arm64`) — `build-binary.ts`
-  supports the targets; not shipped.
-- **Delete `LoginModal` + `cli/src/login/*`** — provably unreachable
-  post-0.1.10.
+- **`opencode` (Zen) preset still hardcoded** (2-id catalog, `opencode/`
+  prefix bug). One-liner if reported — see [[gotchas]].
+- **3 un-shimmed React hooks** (`use-connection-status`, `use-gravity-ad`,
+  `use-agent-validation`) — in-place `BYOK_AT_BOOT` logic.
+- **`ForkHooks.shouldSkipReactHook` dead field** (~10 lines).
+- **macOS binaries** — build-binary.ts supports, never shipped.
+- **Delete `LoginModal` + `cli/src/login/*`** — unreachable post-0.1.10.
 
 ## Open questions (carry-over)
 
-- **`codexspark` / `codexplan` aliases unverified for OAuth-bearer
-  path.** One-line revert in `OPENROUTER_TO_OPENAI_MODEL_MAP` if either
-  4xx's.
-- **Token refresh ergonomics** — `getValidCodexCredentials` refresh
-  failure mid-conversation throws into the agent loop. Clearer
-  reconnect hint?
-- **`/connect:chatgpt` deprecation** — retire the singleton in a future
-  minor?
+- `codexspark`/`codexplan` aliases unverified on OAuth-bearer path.
+- Token-refresh ergonomics (`getValidCodexCredentials` throw mid-loop).
+- `/connect:chatgpt` deprecation timing.
 
 ## Security carry-over
 
-- Previously-leaked OpenCode key revoked at opencode.ai on 2026-05-19.
-  Revoked key string still in plaintext in
-  `~/.config/manicode/message-history.json`. User declined a scrub.
-- `~/.config/manicode/codex-oauth.json` follows 0600, tokens in
-  plaintext — same threat model as `providers.json` / `credentials.json`.
+- Revoked OpenCode key still plaintext in
+  `~/.config/manicode/message-history.json` (user declined scrub).
+- **New 2026-06-11:** user's Serper API key pasted in-chat → lives in this
+  session's transcript on disk. Advised rotation at serper.dev; low
+  stakes (search-only key). Key is env-var-only, never written to repo.
+- `codex-oauth.json` 0600, tokens plaintext — same model as
+  `providers.json`.
 
 ## Rollback paths
 
-- **Undo the v1.1.0 strategy-B sync** (restore the backend): pre-sync tip
-  `e534b0650` has `web/` + `packages/internal` intact —
-  `git checkout e534b0650 -- web packages/internal packages/billing
-  packages/bigquery packages/build-tools scripts` restores those trees.
-- **Pre-shim (v1.0.2) rollback** still anchored by tag
-  `v1.0.2-pre-shim` + branch `modded-pre-shim` + binary
-  `cli/bin/codebuff-mod.pre-shim.exe`.
-- **Undo 1.1.2 blend only:** revert `230fd309c` → back to 1.1.1's
-  hardcoded black. Undo both UI fixes: also revert `0d5a84979`.
+- **Undo web-tools rewire:** revert its commit, or surgically delete the
+  two dispatch blocks in `codebuff-web-api.ts`, the gate call in
+  `agent-registry.ts`, and `fork-impls/{byok-web-tools,search-providers}.ts`.
+- **Undo strategy-B sync** (restore backend): `git checkout e534b0650 --
+  web packages/internal packages/billing packages/bigquery
+  packages/build-tools scripts`.
+- **Pre-shim rollback:** tag `v1.0.2-pre-shim` + branch `modded-pre-shim`.
+- **Undo 1.1.x UI fixes:** revert `230fd309c` (blend) / `0d5a84979`
+  (opaque fill).
 
 ## Skills for next session
 
-- `/to-issues` — if macOS binaries / login dead-code removal / the
-  2 stale tests get turned into trackable tickets.
-- `/grill-me` — if scoping any deferred item.
+- `/verify` or live smoke recipe above — if validating the fallback chain.
+- `/to-issues` — if deferred items become tickets.
 
 ## Related
 
