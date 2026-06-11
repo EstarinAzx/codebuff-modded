@@ -34,7 +34,8 @@ describe('providers-models — catalog', () => {
   test('catalog presets are populated, churning presets are empty', () => {
     expect(MODEL_CATALOG.openai.length).toBeGreaterThan(0)
     expect(MODEL_CATALOG.anthropic.length).toBeGreaterThan(0)
-    expect(MODEL_CATALOG['opencode-go'].length).toBeGreaterThan(0)
+    // opencode-go is churning since v1.0.6 — empty catalog triggers a live probe
+    expect(MODEL_CATALOG['opencode-go'].length).toBe(0)
     expect(MODEL_CATALOG.openrouter.length).toBe(0)
     expect(MODEL_CATALOG.together.length).toBe(0)
     expect(MODEL_CATALOG.groq.length).toBe(0)

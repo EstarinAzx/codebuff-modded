@@ -73,7 +73,7 @@ describe('providers — file I/O', () => {
     )
     const raw = fs.readFileSync(tmpFile, 'utf8')
     const parsed = JSON.parse(raw)
-    expect(parsed.version).toBe(1)
+    expect(parsed.version).toBe(2)
     expect(parsed.profiles).toHaveLength(1)
     expect(parsed.activeProfileId).toBe(parsed.profiles[0].id)
   })
