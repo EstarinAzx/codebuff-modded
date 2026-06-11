@@ -5,9 +5,12 @@ import {
 } from '@codebuff/common/util/agent-id-parsing'
 import { DEFAULT_ORG_PREFIX } from '@codebuff/common/util/agent-name-normalization'
 
+import { gateByokWebTools } from '../llm-api/fork-impls/byok-web-tools'
+
 import type { DynamicAgentValidationError } from '@codebuff/common/templates/agent-validation'
 import type { AgentTemplate } from '@codebuff/common/types/agent-template'
 import type { FetchAgentFromDatabaseFn } from '@codebuff/common/types/contracts/database'
+import type { CiEnv } from '@codebuff/common/types/contracts/env'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
 import type { ParamsExcluding } from '@codebuff/common/types/function-params'
 import type { ProjectFileContext } from '@codebuff/common/util/file'
@@ -93,11 +96,13 @@ export async function getAgentTemplate(
 export function assembleLocalAgentTemplates(params: {
   fileContext: ProjectFileContext
   logger: Logger
+  // BYOK fork: when provided, gates tools that need user-supplied keys
+  ciEnv?: CiEnv
 }): {
   agentTemplates: Record<string, AgentTemplate>
   validationErrors: DynamicAgentValidationError[]
 } {
-  const { fileContext, logger } = params
+  const { fileContext, logger, ciEnv } = params
   // Load dynamic agents using the service
   const { templates: dynamicTemplates, validationErrors } = validateAgents({
     agentTemplates: fileContext.agentTemplates,
@@ -106,7 +111,7 @@ export function assembleLocalAgentTemplates(params: {
 
   // Use dynamic templates only
 
-  const agentTemplates = { ...dynamicTemplates }
+  const agentTemplates = gateByokWebTools({ ...dynamicTemplates }, ciEnv)
   return { agentTemplates, validationErrors }
 }
 

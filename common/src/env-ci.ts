@@ -19,6 +19,12 @@ export const getCiEnv = (): CiEnv => ({
   IS_PULL_REQUEST: process.env.IS_PULL_REQUEST,
   CODEBUFF_GITHUB_TOKEN: process.env.CODEBUFF_GITHUB_TOKEN,
   CODEBUFF_API_KEY: process.env.CODEBUFF_API_KEY,
+  // BYOK fork: direct web_search keys + provider preference
+  // (see llm-api/fork-impls/search-providers.ts)
+  SERPER_API_KEY: process.env.SERPER_API_KEY,
+  BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+  TAVILY_API_KEY: process.env.TAVILY_API_KEY,
+  CBM_SEARCH_PROVIDER: process.env.CBM_SEARCH_PROVIDER,
 })
 
 /**

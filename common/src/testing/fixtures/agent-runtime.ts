@@ -92,6 +92,8 @@ export const testCiEnv = {
   IS_PULL_REQUEST: undefined,
   CODEBUFF_GITHUB_TOKEN: undefined,
   CODEBUFF_API_KEY: 'test-api-key',
+  // BYOK fork: keeps web_search advertised in tests (see gateByokWebTools)
+  SERPER_API_KEY: 'test-serper-key',
 }
 
 /** @deprecated Use createTestAgentRuntimeParams() */

@@ -7,6 +7,13 @@ const CONTEXT7_API_BASE_URL = 'https://context7.com/api/v1'
 const DEFAULT_TYPE = 'txt'
 const FETCH_TIMEOUT_MS = 10_000
 
+// Context7 works keyless — only send Authorization when a key actually exists
+// (unconditional template literal would send "Bearer undefined")
+const context7AuthHeaders = (): Record<string, string> => {
+  const key = process.env['CONTEXT7_API_KEY']
+  return key ? { Authorization: `Bearer ${key}` } : {}
+}
+
 export interface SearchResponse {
   results: Array<{
     id: string
@@ -62,9 +69,7 @@ export async function searchLibraries(params: {
     const fetchStartTime = Date.now()
     const response = await withTimeout(
       fetch(url, {
-        headers: {
-          Authorization: `Bearer ${process.env['CONTEXT7_API_KEY']}`,
-        },
+        headers: context7AuthHeaders(),
       }),
       FETCH_TIMEOUT_MS,
     )
@@ -197,7 +202,7 @@ export async function fetchContext7LibraryDocumentation(
     const response = await withTimeout(
       fetch(url, {
         headers: {
-          Authorization: `Bearer ${process.env['CONTEXT7_API_KEY']}`,
+          ...context7AuthHeaders(),
           'X-Context7-Source': 'codebuff',
         },
       }),

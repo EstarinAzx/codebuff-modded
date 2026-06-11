@@ -353,6 +353,107 @@ describe('Agent Registry', () => {
       expect(result.validationErrors).toHaveLength(0)
     })
 
+    // BYOK gate: web_search without a Serper key can only fail — don't advertise it
+    it('strips web_search from toolNames when ciEnv lacks SERPER_API_KEY', () => {
+      const fileContext: ProjectFileContext = {
+        ...mockFileContext,
+        agentTemplates: {
+          'researcher.ts': {
+            id: 'researcher',
+            displayName: 'Researcher',
+            systemPrompt: 'Research system prompt',
+            instructionsPrompt: 'Research instructions',
+            stepPrompt: 'Research step prompt',
+            toolNames: ['web_search', 'read_docs', 'end_turn'],
+            spawnableAgents: [],
+            outputMode: 'last_message',
+            includeMessageHistory: true,
+            model: 'anthropic/claude-4-sonnet-20250522',
+            spawnerPrompt: 'Researches',
+          },
+        },
+      }
+
+      const result = assembleLocalAgentTemplates({
+        ...agentRuntimeImpl,
+        ciEnv: {},
+        fileContext,
+      })
+
+      expect(result.agentTemplates['researcher'].toolNames).not.toContain(
+        'web_search',
+      )
+      // read_docs works keyless via Context7 — stays advertised
+      expect(result.agentTemplates['researcher'].toolNames).toContain(
+        'read_docs',
+      )
+      expect(result.agentTemplates['researcher'].toolNames).toContain(
+        'end_turn',
+      )
+    })
+
+    it('keeps web_search when any non-Serper search key is set (fallback providers count)', () => {
+      const fileContext: ProjectFileContext = {
+        ...mockFileContext,
+        agentTemplates: {
+          'researcher.ts': {
+            id: 'researcher',
+            displayName: 'Researcher',
+            systemPrompt: 'Research system prompt',
+            instructionsPrompt: 'Research instructions',
+            stepPrompt: 'Research step prompt',
+            toolNames: ['web_search', 'end_turn'],
+            spawnableAgents: [],
+            outputMode: 'last_message',
+            includeMessageHistory: true,
+            model: 'anthropic/claude-4-sonnet-20250522',
+            spawnerPrompt: 'Researches',
+          },
+        },
+      }
+
+      const result = assembleLocalAgentTemplates({
+        ...agentRuntimeImpl,
+        ciEnv: { BRAVE_API_KEY: 'brave-test-key' },
+        fileContext,
+      })
+
+      expect(result.agentTemplates['researcher'].toolNames).toContain(
+        'web_search',
+      )
+    })
+
+    it('keeps web_search in toolNames when SERPER_API_KEY is set', () => {
+      const fileContext: ProjectFileContext = {
+        ...mockFileContext,
+        agentTemplates: {
+          'researcher.ts': {
+            id: 'researcher',
+            displayName: 'Researcher',
+            systemPrompt: 'Research system prompt',
+            instructionsPrompt: 'Research instructions',
+            stepPrompt: 'Research step prompt',
+            toolNames: ['web_search', 'end_turn'],
+            spawnableAgents: [],
+            outputMode: 'last_message',
+            includeMessageHistory: true,
+            model: 'anthropic/claude-4-sonnet-20250522',
+            spawnerPrompt: 'Researches',
+          },
+        },
+      }
+
+      const result = assembleLocalAgentTemplates({
+        ...agentRuntimeImpl,
+        ciEnv: { SERPER_API_KEY: 'sk-serper-test' },
+        fileContext,
+      })
+
+      expect(result.agentTemplates['researcher'].toolNames).toContain(
+        'web_search',
+      )
+    })
+
     it('should handle validation errors in dynamic templates', () => {
       const fileContext: ProjectFileContext = {
         ...mockFileContext,

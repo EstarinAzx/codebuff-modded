@@ -45,6 +45,33 @@ export function createMockStreamWithToolCalls(
   return generator()
 }
 
+/**
+ * Minimal researcher agent for web_search/read_docs tool tests.
+ * Replaces the deleted agents-graveyard researcher (gone since the
+ * strategy-B lean sync); same shape minus publisher/handleSteps.
+ */
+export const testResearcherAgent = {
+  id: 'researcher',
+  displayName: 'Test Researcher',
+  spawnerPrompt:
+    'Expert at browsing the web or reading technical documentation.',
+  model: 'x-ai/grok-4-fast',
+  inputSchema: {
+    prompt: {
+      type: 'string',
+      description: 'A question to answer using web search and documentation',
+    },
+  },
+  outputMode: 'last_message',
+  includeMessageHistory: false,
+  toolNames: ['web_search', 'read_docs', 'end_turn'],
+  spawnableAgents: [],
+  systemPrompt:
+    'You are an expert researcher who can search the web and read documentation.',
+  instructionsPrompt: 'Provide comprehensive research on the topic.',
+  stepPrompt: 'Always end your response with the end_turn tool.',
+} as any
+
 export const mockFileContext: ProjectFileContext = {
   projectRoot: '/test',
   cwd: '/test',

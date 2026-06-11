@@ -1,5 +1,11 @@
 import { withTimeout } from '@codebuff/common/util/promise'
 
+import {
+  byokReadDocs,
+  byokWebSearch,
+  isBackendConfigured,
+} from './fork-impls/byok-web-tools'
+
 import type { ClientEnv, CiEnv } from '@codebuff/common/types/contracts/env'
 import type { JSONObject } from '@codebuff/common/types/json'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
@@ -169,6 +175,19 @@ export async function callWebSearchAPI(params: {
   apiKey?: string
 }): Promise<{ result?: string; error?: string; creditsUsed?: number }> {
   const { query, depth = 'standard', repoUrl, fetch, logger, env } = params
+
+  // BYOK fork: no hosted backend configured → go straight to Serper instead
+  // of dialing the sentinel URL (which is contractually never reachable).
+  if (
+    !isBackendConfigured({
+      clientEnv: env.clientEnv,
+      ciEnv: env.ciEnv,
+      baseUrlOverride: params.baseUrl,
+    })
+  ) {
+    return byokWebSearch({ query, depth, fetch, logger, ciEnv: env.ciEnv })
+  }
+
   const payload = { query, depth, ...(repoUrl ? { repoUrl } : {}) }
 
   const res = await callCodebuffV1({
@@ -204,6 +223,19 @@ export async function callDocsSearchAPI(params: {
   apiKey?: string
 }): Promise<{ documentation?: string; error?: string; creditsUsed?: number }> {
   const { libraryTitle, topic, maxTokens, repoUrl, fetch, logger, env } = params
+
+  // BYOK fork: no hosted backend configured → fetch docs from Context7
+  // directly (works keyless) instead of dialing the sentinel URL.
+  if (
+    !isBackendConfigured({
+      clientEnv: env.clientEnv,
+      ciEnv: env.ciEnv,
+      baseUrlOverride: params.baseUrl,
+    })
+  ) {
+    return byokReadDocs({ libraryTitle, topic, maxTokens, fetch, logger })
+  }
+
   const payload: Record<string, unknown> = { libraryTitle }
   if (topic) payload.topic = topic
   if (typeof maxTokens === 'number') payload.maxTokens = maxTokens

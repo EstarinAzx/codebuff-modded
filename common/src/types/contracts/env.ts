@@ -87,6 +87,12 @@ export type CiEnv = BaseCiEnv & {
   CODEBUFF_GITHUB_TOKEN?: string
   CODEBUFF_API_KEY?: string
   EVAL_RESULTS_EMAIL?: string
+  // BYOK fork: user-supplied search keys powering direct web_search (no
+  // backend). Any one suffices; CBM_SEARCH_PROVIDER picks the primary.
+  SERPER_API_KEY?: string
+  BRAVE_API_KEY?: string
+  TAVILY_API_KEY?: string
+  CBM_SEARCH_PROVIDER?: string
 }
 
 /**

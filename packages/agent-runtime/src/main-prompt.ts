@@ -182,8 +182,9 @@ export async function callMainPrompt(
   }
 
   // Assemble local agent templates from fileContext
+  // (ciEnv feeds the BYOK gate: tools needing user keys drop out when unset)
   const { agentTemplates: localAgentTemplates, validationErrors } =
-    assembleLocalAgentTemplates({ fileContext, logger })
+    assembleLocalAgentTemplates({ fileContext, logger, ciEnv: params.ciEnv })
 
   if (validationErrors.length > 0) {
     sendAction({
