@@ -370,6 +370,11 @@ export const ChatInputBar = ({
           borderStyle: 'single',
           borderColor,
           customBorderChars: BORDER_CHARS,
+          // Opaque fill — input children render transparent cells, so without
+          // this, content behind the box (e.g. separator lines) bleeds through.
+          // Plain black (not theme.surface): user wants the box to blend with
+          // the terminal background instead of standing out as a lighter panel.
+          backgroundColor: '#000000',
           paddingLeft: 1,
           paddingRight: 1,
           paddingTop: 0,
