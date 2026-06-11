@@ -3,26 +3,25 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-06-11
 tags: [context, active-work]
-ship: 1.1.1 (SHIPPED — opaque black chat input box, bleed-through fix; npm + GH release live)
-focus: nothing in flight — 1.1.1 shipped
+ship: 1.1.2 (SHIPPED — input box blends with terminal bg via OSC 11; npm + GH release live)
+focus: nothing in flight — 1.1.2 shipped
 ---
 
 # Active Work
 
 _Last updated: 2026-06-11 by Fable 5 (auto)_
-_At commit: `modded` tip `834b4a50c` (the 1.1.1 bump commit; `v1.1.1` tag) — pushed. Working tree clean (untracked `.codeboarding/` only)._
+_At commit: `modded` tip `4d9e48f40` (the 1.1.2 bump; `v1.1.2` tag) + this context commit — pushed. Working tree clean (untracked `.codeboarding/` only)._
 
 ## Current focus
 
-**Nothing in flight. SHIPPED v1.1.1 (2026-06-11)** — patch release fixing
-TUI background bleed-through in the chat input box. The normal-mode input
-box painted no background; its children render transparent cells, so
-unpainted cells showed stale framebuffer content (yellow separator line
-through the placeholder row). Fix: opaque `#000000` fill on the input box
-(`cli/src/components/chat-input-bar.tsx:376`, commit `0d5a84979`).
-Hardcoded black per user preference over `theme.surface` (user wants it
-to blend with terminal bg). See [[gotchas]] "OpenTUI transparent cells
-don't repaint" for the general trap.
+**Nothing in flight. SHIPPED v1.1.2 (2026-06-11)** — same-day follow-up to
+v1.1.1. 1.1.1 fixed TUI bleed-through with a hardcoded black input-box
+fill; 1.1.2 replaces that with the terminal's own background color queried
+once via OSC 11 (`cli/src/hooks/use-terminal-background.ts` →
+`renderer.getPalette()`, `#000000` fallback). Box stays opaque (required —
+see [[gotchas]] "OpenTUI transparent cells don't repaint") but blends
+invisibly with any terminal theme. askUser questions box painted too
+(same bleed risk). Commits: `230fd309c` (feat), `4d9e48f40` (bump).
 
 v1.1.0 (strategy-B BYOK-only sync) context unchanged — rationale in
 [[decisions]], merge+release mechanics in
@@ -31,41 +30,41 @@ v1.1.0 (strategy-B BYOK-only sync) context unchanged — rationale in
 ## State
 
 - **In flight:** nothing.
-- **modded:** `v1.1.1` tag at `834b4a50c`, pushed to `origin/modded`.
-- **Release artifacts (v1.1.1):**
-  - npm `codebuff-mod@1.1.1` live (`latest`), 9.4 kB launcher.
+- **modded:** `v1.1.2` tag at `4d9e48f40`, pushed to `origin/modded`.
+- **Release artifacts (v1.1.2):**
+  - npm `codebuff-mod@1.1.2` live (`latest`), 9.4 kB launcher.
   - GitHub release
-    https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.1.1
+    https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.1.2
     — three tarballs: win32-x64, linux-x64, linux-arm64 (~47–50 MB),
-    asset names verified against `cli/release/index.js` PLATFORM_TARGETS.
-  - `cli/bin/` + `cli/dist-binaries/` hold the 1.1.1 builds (gitignored).
-- **Verify at ship (1.1.1):** cli typecheck green; win32 binary prints
-  `1.1.1`; user eyeballed the opaque box via `bun run dev` (gate passed).
-  CLI test suite NOT re-run this session (UI-only change; the 2 known-stale
+    assets verified against `cli/release/index.js` PLATFORM_TARGETS.
+  - `cli/bin/` + `cli/dist-binaries/` hold the 1.1.2 builds (gitignored).
+- **Verify at ship (1.1.2):** cli typecheck green; win32 binary prints
+  `1.1.2`; user eyeballed terminal-bg blend via `bun run dev` (gate
+  passed). CLI test suite NOT re-run (UI-only change; the 2 known-stale
   `providers*` fails from 1.1.0 still stand — see below).
-- **Branches/tags:** unchanged from 1.1.0 — `modded-pre-shim` (v1.0.2
-  archive), pre-sync tip `e534b0650` (backend-restore source), `upstream`
-  remote → `CodebuffAI/codebuff`.
+- **Branches/tags:** unchanged — `modded-pre-shim` (v1.0.2 archive),
+  pre-sync tip `e534b0650` (backend-restore source), `upstream` remote →
+  `CodebuffAI/codebuff`.
 - **Blocked:** none.
 
 ## Pick up here
 
-Nothing required — 1.1.1 is out. Optional follow-ups (carried from 1.1.0):
+Nothing required — 1.1.2 is out. Optional follow-ups:
 
-- **Live BYOK smoke on the published binary** — still unrun headless.
-  `npm i -g codebuff-mod` → `/providers:add <preset> <key>` → small
-  prompt → confirm Path C dispatches. Also confirms cross-compiled linux
-  tarballs run on actual linux (built on Windows).
+- **Live BYOK smoke on the published binary** (carried since 1.1.0, still
+  unrun): `npm i -g codebuff-mod` → `/providers:add <preset> <key>` →
+  small prompt → confirm Path C dispatches. Also confirms cross-compiled
+  linux tarballs run on actual linux (built on Windows).
 - **Fix the 2 stale CLI tests** — `providers-models.test.ts` asserts
   `MODEL_CATALOG['opencode-go'].length > 0` (false since v1.0.6) and
   `providers.test.ts` asserts schema `version === 1` (fork is on v2/v3).
-- **Light-theme follow-up (new, minor):** input box bg is hardcoded
-  `#000000`; light theme would show a black box. Dark-only conditional
-  (`theme.surface` on light) if anyone runs light theme.
-- **Same bleed risk elsewhere (new, minor):** the askUser questions box
-  (`chat-input-bar.tsx` askUserState branch) still paints no background —
-  same transparent-cell bleed possible there. One-line fix if reported.
+- **OSC 11 first-paint flash (cosmetic, only if user complains):** first
+  frame renders the black fallback, snaps to detected color when the
+  query answers. Fix would hold initial paint until palette resolves.
 - **Next upstream sync** — follow MERGE-STRATEGY.md as-is (turnkey).
+  Note: `chat-input-bar.tsx` now carries fork-local edits (bg fill + the
+  use-terminal-background import) — expect a trivial conflict there on
+  the next sync.
 
 ## Deferred — chase only if it surfaces
 
@@ -113,7 +112,8 @@ Nothing required — 1.1.1 is out. Optional follow-ups (carried from 1.1.0):
 - **Pre-shim (v1.0.2) rollback** still anchored by tag
   `v1.0.2-pre-shim` + branch `modded-pre-shim` + binary
   `cli/bin/codebuff-mod.pre-shim.exe`.
-- **Undo 1.1.1 fix only:** revert `0d5a84979` (single-file, 5 added lines).
+- **Undo 1.1.2 blend only:** revert `230fd309c` → back to 1.1.1's
+  hardcoded black. Undo both UI fixes: also revert `0d5a84979`.
 
 ## Skills for next session
 
