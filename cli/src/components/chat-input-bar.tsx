@@ -10,6 +10,7 @@ import { PublishContainer } from './publish-container'
 import { SuggestionMenu, type SuggestionItem } from './suggestion-menu'
 import { useAskUserBridge } from '../hooks/use-ask-user-bridge'
 import { useEvent } from '../hooks/use-event'
+import { useTerminalBackground } from '../hooks/use-terminal-background'
 import { useChatStore } from '../state/chat-store'
 import { shouldInterceptChatInputKey } from '../utils/chat-input-key-intercept'
 import { getInputModeConfig } from '../utils/input-modes'
@@ -117,6 +118,14 @@ export const ChatInputBar = ({
   const modeConfig = getInputModeConfig(inputMode)
   const askUserState = useChatStore((state) => state.askUserState)
   const hasAnyPreview = hasSuggestionMenu
+
+  // Opaque fill that visually blends with the terminal: input children render
+  // transparent cells, and OpenTUI never repaints unpainted cells, so a truly
+  // transparent box lets stale frame content bleed through. Painting the
+  // terminal's own background color (OSC 11) looks identical to transparent
+  // while overwriting stale cells; black fallback when the query goes
+  // unanswered.
+  const inputBoxBg = useTerminalBackground() ?? '#000000'
 
   // Increase menu size on larger screen heights
   const normalModeMaxVisible = terminalHeight > 35 ? 15 : 10
@@ -279,6 +288,7 @@ export const ChatInputBar = ({
           borderStyle: 'single',
           borderColor: theme.primary,
           customBorderChars: BORDER_CHARS,
+          backgroundColor: inputBoxBg,
         }}
       >
         <MultipleChoiceForm
@@ -370,11 +380,7 @@ export const ChatInputBar = ({
           borderStyle: 'single',
           borderColor,
           customBorderChars: BORDER_CHARS,
-          // Opaque fill — input children render transparent cells, so without
-          // this, content behind the box (e.g. separator lines) bleeds through.
-          // Plain black (not theme.surface): user wants the box to blend with
-          // the terminal background instead of standing out as a lighter panel.
-          backgroundColor: '#000000',
+          backgroundColor: inputBoxBg,
           paddingLeft: 1,
           paddingRight: 1,
           paddingTop: 0,
