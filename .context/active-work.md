@@ -3,8 +3,8 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-06-11
 tags: [context, active-work]
-ship: web-tools rewire (web_search/read_docs BYOK-direct) — committed, release pending user call
-focus: shipping the web-tools rewire (1.2.0?)
+ship: 1.2.0 (SHIPPED — BYOK-direct web tools; npm + GH release live)
+focus: nothing in flight — 1.2.0 shipped
 ---
 
 # Active Work
@@ -44,8 +44,10 @@ v2) and revived 2 import-broken agent-runtime test files
 
 ## State
 
-- **In flight:** ship step — push `modded`, then user decides full 1.2.0
-  release (npm + GH tarballs) vs push-only.
+- **In flight:** nothing — **v1.2.0 SHIPPED** (npm `codebuff-mod@1.2.0`
+  `latest`; GH release
+  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.2.0 with
+  3 tarballs verified; `modded` + `v1.2.0` tag pushed).
 - **Verified:** agent-runtime 451 pass / 0 fail (18 new tests: 8 facade,
   11 provider-chain/gating, plus revived files); typecheck green in
   common / agent-runtime / sdk / cli; common+sdk+cli failures
@@ -53,21 +55,21 @@ v2) and revived 2 import-broken agent-runtime test files
 - **Live smoke:** user tested Serper path end-to-end via `bun run dev`
   (key set, real search worked). Brave/Tavily + fallback chain are
   unit-tested only — no live key.
-- **Version:** still 1.1.2 — no bump committed yet.
+- **Version:** 1.2.0 (`104addd40` bump; binary prints 1.2.0).
 - **Branches/tags:** unchanged (`modded-pre-shim`, pre-sync tip
   `e534b0650`, `upstream` remote).
 - **Blocked:** none.
 
 ## Pick up here
 
-1. **Ship:** push `modded`; if user wants a release, bump 1.2.0 and follow
-   MERGE-STRATEGY §Step 6 (build win32 + 2 linux binaries, tar, GH release
-   BEFORE npm publish).
-2. **Optional live smoke for fallback:** needs a Brave or Tavily key —
-   set both that key and a deliberately-bad `SERPER_API_KEY`, confirm
-   chain falls through.
-3. **Carried:** live BYOK smoke on published binary (since 1.1.0); OSC 11
-   first-paint flash (cosmetic).
+Nothing required — 1.2.0 is out. Optional:
+
+1. **Live smoke on published binary** (carried since 1.1.0): fresh
+   `npm i -g codebuff-mod` → `/providers:add` → prompt → Path C dispatch;
+   now also covers web_search with `SERPER_API_KEY` set.
+2. **Fallback-chain live smoke:** needs a Brave or Tavily key — set it
+   plus a deliberately-bad `SERPER_API_KEY`, confirm chain falls through.
+3. **OSC 11 first-paint flash** (cosmetic, carried).
 
 ## Known test-suite rot (pre-existing, stash-baselined 2026-06-11)
 

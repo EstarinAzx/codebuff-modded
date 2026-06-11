@@ -26,12 +26,12 @@ deleted backend:
 
 ## Next task
 
-**Finish the ship step.** Code committed on `modded`; remaining:
+**Nothing required — v1.2.0 SHIPPED** (npm `codebuff-mod@1.2.0` latest;
+GH release v1.2.0 with 3 tarballs; `modded` + tag pushed). Optional:
 
-1. Push `modded` (if last session didn't — check `git status -sb`).
-2. User call on release: push-only vs full **1.2.0** (bump version →
-   binaries win32-x64 + linux-x64 + linux-arm64 → tar → GH release →
-   npm publish, in THAT order — MERGE-STRATEGY §Step 6 runbook).
+1. Live smoke on published binary (carried since 1.1.0) — now also
+   covers `web_search` with `SERPER_API_KEY`.
+2. Fallback-chain live smoke (needs a Brave/Tavily key + bad Serper key).
 
 ## Landmines / notes
 
