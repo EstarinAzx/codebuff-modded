@@ -108,3 +108,9 @@ tar -czf "$dist\codebuff-mod-win32-x64.tar.gz" codebuff-mod.exe
 ```
 
 Cross-compile order matters: each `OVERRIDE_TARGET=bun-linux-*` build overwrites `cli/bin/codebuff-mod`. Tar each before kicking off the next. Win32 is safe because the output filename is `.exe` and doesn't collide.
+
+## OpenTUI transparent cells don't repaint — content behind bleeds through
+
+OpenTUI elements with `backgroundColor: 'transparent'` (the codebase default — `theme.background` itself is `'transparent'` so the app rides the terminal bg) only paint cells their glyphs cover. Any cell a component does NOT paint keeps whatever the framebuffer already held — stale rows from earlier frames, borders of elements behind it. Symptom: a colored line "bleeding through" the gaps of foreground text (v1.1.1 bug: yellow separator line through the chat input placeholder row).
+
+Fix pattern: paint an opaque `backgroundColor` on the PARENT box — children can stay transparent, they composite over the parent's fill. The chat input box uses hardcoded `#000000` (`cli/src/components/chat-input-bar.tsx`, user preference over `theme.surface`); compact mode and the status bar use `theme.surface`. Known still-unpainted sibling: the askUser questions box in the same file — same bleed risk if it ever shows over busy content.

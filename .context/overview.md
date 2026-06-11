@@ -1,7 +1,7 @@
 ---
 type: overview
 project: codebuff (fork — modded branch)
-updated: 2026-05-22
+updated: 2026-06-11
 tags: [moc, codebuff, llm-proxy, byok]
 ---
 
@@ -9,7 +9,7 @@ tags: [moc, codebuff, llm-proxy, byok]
 
 Upstream Codebuff is a composable coding-agent monorepo where a hosted backend proxies LLM requests to upstream providers and bills users in credits via BigQuery + Stripe. CLI is a TUI built on OpenTUI + React. Also ships `freebuff`, the free tier.
 
-**This fork has been ripped to standalone BYOK** (`modded` branch, published as `codebuff-mod` on npm, **v1.1.0** as of 2026-06-11). End users `npm install -g codebuff-mod`, run `cbm`, register a provider profile with `/providers:add <preset> <apiKey>` (or `/providers:add codex` for OAuth-backed ChatGPT routing), and agents run directly against their provider — no codebuff.com account, backend, or billing involved.
+**This fork has been ripped to standalone BYOK** (`modded` branch, published as `codebuff-mod` on npm, **v1.1.1** as of 2026-06-11). End users `npm install -g codebuff-mod`, run `cbm`, register a provider profile with `/providers:add <preset> <apiKey>` (or `/providers:add codex` for OAuth-backed ChatGPT routing), and agents run directly against their provider — no codebuff.com account, backend, or billing involved.
 
 **As of v1.1.0 the fork is BYOK-only with no in-repo backend.** The 2026-06-11 strategy-B sync rode upstream's pivot to a CLI/SDK-only public snapshot and dropped `web/` + `packages/{internal,billing,bigquery,build-tools}`. SDK Path B (`CODEBUFF_USE_BACKEND=1` in `sdk/src/impl/database.ts`) still exists for external SDK consumers but now targets a *remote* codebuff.com — the fork no longer hosts the backend. See [[decisions]] "Ride upstream's snapshot deletion to a BYOK-only fork (strategy B)" and [MERGE-STRATEGY.md](../MERGE-STRATEGY.md) (rewritten for the lean tree).
 
@@ -43,7 +43,6 @@ Maintained upstream — read these directly:
 
 ## User-facing surfaces
 
-- **HTTP** — Next.js routes under `web/src/app/api/**` (chat completions proxy at `/api/v1/chat/completions`)
 - **CLI/TUI** — `cli/` (OpenTUI + React)
 - **SDK** — `sdk/` (JS/TS, consumed by CLI + external users)
 - **Agent runtime** — `packages/agent-runtime/` (server-side tool dispatch)
