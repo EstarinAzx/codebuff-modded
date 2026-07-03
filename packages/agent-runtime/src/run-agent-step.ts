@@ -1,13 +1,18 @@
 import { AnalyticsEvent } from '@codebuff/common/constants/analytics-events'
 import { shouldUseLocalTokenCountForFreebuffDeepseekFlash } from '@codebuff/common/constants/free-agents'
-import { supportsCacheControl } from '@codebuff/common/old-constants'
+import {
+  supportsAssistantPrefill,
+  supportsCacheControl,
+} from '@codebuff/common/old-constants'
 import { TOOLS_WHICH_WONT_FORCE_NEXT_STEP } from '@codebuff/common/tools/constants'
 import { buildArray } from '@codebuff/common/util/array'
 import {
   AbortError,
+  FETCH_IDLE_TIMEOUT_USER_MESSAGE,
   extractApiErrorDetails,
   getErrorObject,
   isAbortError,
+  isFetchIdleTimeoutError,
 } from '@codebuff/common/util/error'
 import { serializeCacheDebugCorrelation } from '@codebuff/common/util/cache-debug'
 import { systemMessage, userMessage } from '@codebuff/common/util/messages'
@@ -18,7 +23,10 @@ import { CACHE_DEBUG_FULL_LOGGING } from './constants'
 import { callTokenCountAPI } from './llm-api/codebuff-web-api'
 import { getMCPToolData } from './mcp'
 import { getAgentStreamFromTemplate } from './prompt-agent-stream'
-import { runProgrammaticStep } from './run-programmatic-step'
+import {
+  clearProgrammaticRunState,
+  runProgrammaticStep,
+} from './run-programmatic-step'
 import { additionalSystemPrompts } from './system-prompt/prompts'
 import { getAgentTemplate } from './templates/agent-registry'
 import { buildAgentToolSet } from './templates/prompts'
@@ -51,6 +59,7 @@ import type {
   PromptAiSdkFn,
 } from '@codebuff/common/types/contracts/llm'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
+import type { TraceWriter } from '@codebuff/common/types/contracts/trace'
 import type { ParamsExcluding } from '@codebuff/common/types/function-params'
 import type {
   Message,
@@ -120,6 +129,7 @@ export const runAgentStep = async (
 
     trackEvent: TrackEventFn
     promptAiSdk: PromptAiSdkFn
+    traceWriter?: TraceWriter
   } & ParamsExcluding<
     typeof processStream,
     | 'agentContext'
@@ -258,6 +268,23 @@ export const runAgentStep = async (
 
   const { model } = agentTemplate
 
+  // A step can start with the history ending on an assistant message — e.g. a
+  // continuation after a think-only response for an agent with no stepPrompt.
+  // Claude 4.6+ rejects such requests as unsupported assistant prefill, so end
+  // the conversation with a user message instead.
+  const lastMessage =
+    agentState.messageHistory[agentState.messageHistory.length - 1]
+  if (lastMessage?.role === 'assistant' && !supportsAssistantPrefill(model)) {
+    agentState.messageHistory = [
+      ...agentState.messageHistory,
+      userMessage({
+        content: withSystemTags('Continue from where you left off.'),
+        timeToLive: 'agentStep' as const,
+        keepDuringTruncation: true,
+      }),
+    ]
+  }
+
   let stepCreditsUsed = 0
 
   const onCostCalculated = async (credits: number) => {
@@ -331,6 +358,21 @@ export const runAgentStep = async (
       }
     : undefined
 
+  // Full message histories go to the trace writer, which appends each message
+  // exactly once (see TraceWriter).
+  params.traceWriter?.recordStep({
+    agentId: agentState.agentId,
+    agentType: String(agentType),
+    runId: agentState.runId,
+    userInputId,
+    step: iterationNum,
+    system,
+    messages: agentState.messageHistory,
+  })
+
+  // Log a summary only: the full message history, system prompt, and agent
+  // template are large and logging them every step bloats log files
+  // quadratically over the course of a chat.
   logger.debug(
     {
       iteration: iterationNum,
@@ -338,14 +380,12 @@ export const runAgentStep = async (
       model,
       duration: Date.now() - startTime,
       contextTokenCount: agentState.contextTokenCount,
-      agentMessages: agentState.messageHistory.concat().reverse(),
-      system,
+      messageCount: agentState.messageHistory.length,
       prompt,
       params: spawnParams,
-      agentContext,
       systemTokens,
-      agentTemplate,
-      tools: params.tools,
+      agentTemplateId: agentTemplate.id,
+      toolNames: params.tools ? Object.keys(params.tools) : undefined,
     },
     `Start agent ${agentType} step ${iterationNum} (${userInputId}${prompt ? ` - Prompt: ${prompt.slice(0, 20)}` : ''})`,
   )
@@ -426,7 +466,6 @@ export const runAgentStep = async (
 
   const {
     fullResponse: fullResponseAfterStream,
-    fullResponseChunks,
     hadToolCallError,
     messageId,
     toolCalls,
@@ -515,6 +554,17 @@ export const runAgentStep = async (
     agentContext,
   }
 
+  // Capture the assistant response and tool results added during this step
+  params.traceWriter?.recordStep({
+    agentId: agentState.agentId,
+    agentType: String(agentType),
+    runId: agentState.runId,
+    userInputId,
+    step: iterationNum,
+    system,
+    messages: agentState.messageHistory,
+  })
+
   logger.debug(
     {
       iteration: iterationNum,
@@ -524,13 +574,11 @@ export const runAgentStep = async (
       shouldEndTurn,
       duration: Date.now() - startTime,
       fullResponse,
-      finalMessageHistoryWithToolResults: agentState.messageHistory
-        .concat()
-        .reverse(),
+      // Summarize instead of logging the full message history: logging it
+      // every step bloats log files quadratically over the course of a chat.
+      messageCount: agentState.messageHistory.length,
       toolCalls,
       toolResults,
-      agentContext,
-      fullResponseChunks,
       stepCreditsUsed,
     },
     `End agent ${agentType} step ${iterationNum} (${userInputId}${prompt ? ` - Prompt: ${prompt.slice(0, 20)}` : ''})`,
@@ -573,6 +621,11 @@ export async function loopAgentSteps(
     parentTools?: ToolSet
     prompt: string | undefined
     signal: AbortSignal
+    /** Optional steering hook. Drained at each step boundary (after a step's LLM
+     * call + tools complete, before the next one). Any returned texts are appended
+     * to the message history as user prompts and keep the turn going, letting a
+     * host "steer" a running agent without aborting or losing the current step. */
+    drainSteeringMessages?: () => string[]
     spawnParams: Record<string, any> | undefined
     startAgentRun: StartAgentRunFn
     userId: string | undefined
@@ -1031,6 +1084,25 @@ export async function loopAgentSteps(
 
       currentPrompt = undefined
       currentParams = undefined
+
+      // Steering: if the host fed user messages while this step ran, append them
+      // now (the step's LLM call + tools have completed, so history is in a clean
+      // state) and keep the turn going so the agent responds to them next step,
+      // rather than waiting for the whole turn to finish.
+      const steered = params.drainSteeringMessages?.()
+      if (steered?.length) {
+        currentAgentState.messageHistory = [
+          ...currentAgentState.messageHistory,
+          ...steered.map((text) =>
+            userMessage({
+              content: buildUserMessageContent(text, undefined, undefined),
+              tags: ['USER_PROMPT'],
+              keepDuringTruncation: true,
+            }),
+          ),
+        ]
+        shouldEndTurn = false
+      }
     }
 
     if (clearUserPromptMessagesAfterResponse) {
@@ -1117,14 +1189,19 @@ export async function loopAgentSteps(
     )
 
     const apiErrorDetails = extractApiErrorDetails(error)
+    const isIdleTimeout = isFetchIdleTimeoutError(error)
     const hasServerMessage = apiErrorDetails.message !== undefined
-    const fallbackMessage =
-      error instanceof Error
-        ? error.message +
-          (apiErrorDetails.statusCode === undefined && error.stack
-            ? `\n\n${error.stack}`
-            : '')
-        : String(error)
+    let fallbackMessage: string
+    if (isIdleTimeout) {
+      fallbackMessage = FETCH_IDLE_TIMEOUT_USER_MESSAGE
+    } else if (error instanceof Error) {
+      const includeStack =
+        apiErrorDetails.statusCode === undefined && error.stack
+      fallbackMessage =
+        error.message + (includeStack ? `\n\n${error.stack}` : '')
+    } else {
+      fallbackMessage = String(error)
+    }
     const errorMessage = apiErrorDetails.message ?? fallbackMessage
     const statusCode = apiErrorDetails.statusCode
 
@@ -1148,9 +1225,10 @@ export async function loopAgentSteps(
       agentState: currentAgentState,
       output: {
         type: 'error',
-        message: hasServerMessage
-          ? errorMessage
-          : 'Agent run error: ' + errorMessage,
+        message:
+          hasServerMessage || isIdleTimeout
+            ? errorMessage
+            : 'Agent run error: ' + errorMessage,
         ...(statusCode !== undefined && { statusCode }),
         ...(apiErrorDetails.errorCode !== undefined && {
           error: apiErrorDetails.errorCode,
@@ -1166,6 +1244,11 @@ export async function loopAgentSteps(
         }),
       },
     }
+  } finally {
+    // The endTurn path inside runProgrammaticStep handles normal completion,
+    // but abort/error exits (e.g. chat SSE disconnects) would otherwise leak
+    // the run's generator, STEP_ALL flag, and proposed file content forever.
+    clearProgrammaticRunState(runId)
   }
 }
 

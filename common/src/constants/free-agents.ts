@@ -1,10 +1,14 @@
 import { parseAgentId } from '../util/agent-id-parsing'
 
-import { FREEBUFF_GEMINI_THINKER_AGENT_ID } from './freebuff-gemini-thinker'
+import {
+  FREEBUFF_GEMINI_PRO_AGENT_IDS,
+  FREEBUFF_GEMINI_THINKER_AGENT_ID,
+} from './freebuff-gemini-thinker'
 import {
   FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
   FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID,
   FREEBUFF_GEMINI_PRO_MODEL_ID,
+  FREEBUFF_GLM_V52_MODEL_ID,
   FREEBUFF_KIMI_MODEL_ID,
   FREEBUFF_MINIMAX_MODEL_ID,
   FREEBUFF_MINIMAX_M3_MODEL_ID,
@@ -21,6 +25,18 @@ import type { CostMode } from './model-config'
 export const FREE_COST_MODE = 'free' as const
 
 /**
+ * The single root agent Freebuff Desktop's hosted (codebuff) harness runs every
+ * thread turn under (see freebuff-desktop thread-agent.ts). Unlike the CLI — which
+ * has one root id per model (`base2-free-<model>`) — the desktop uses ONE root id
+ * for ALL its models, picking the model per tab. It's a first-party free-mode root
+ * just like `base2-free*`, so it's listed in FREEBUFF_ROOT_AGENT_IDS below; its
+ * allowed models are the full desktop picker set (see FREE_MODE_AGENT_MODELS). It
+ * carries the "You are Buffy" CLI marker in its system prompt so it passes
+ * requestHasFreebuffSystemMarker.
+ */
+export const FREEBUFF_DESKTOP_THREAD_AGENT_ID = 'freebuff-desktop-thread'
+
+/**
  * Root-orchestrator agent IDs counted as "a freebuff session" for abuse
  * detection and usage auditing. Subagents (file-picker, basher, etc.) are
  * excluded — they're spawned by the root, so counting them would inflate
@@ -34,6 +50,8 @@ export const FREEBUFF_ROOT_AGENT_IDS = [
   'base2-free-mimo-pro',
   'base2-free-mimo',
   'base2-free-minimax-m3',
+  'base2-free-glm',
+  FREEBUFF_DESKTOP_THREAD_AGENT_ID,
 ] as const
 const FREEBUFF_ROOT_AGENT_ID_SET: ReadonlySet<string> = new Set(
   FREEBUFF_ROOT_AGENT_IDS,
@@ -47,15 +65,18 @@ export const FREEBUFF_ROOT_AGENT_ID_BY_MODEL: Record<string, string> = {
   [FREEBUFF_KIMI_MODEL_ID]: 'base2-free-kimi',
   [FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID]: 'base2-free-deepseek',
   [FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID]: 'base2-free-deepseek-flash',
+  [FREEBUFF_GLM_V52_MODEL_ID]: 'base2-free-glm',
 }
 
 export const FREEBUFF_REVIEWER_AGENT_ID_BY_MODEL: Record<string, string> = {
   [FREEBUFF_MIMO_V25_PRO_MODEL_ID]: 'code-reviewer-mimo-pro',
   [FREEBUFF_MIMO_V25_MODEL_ID]: 'code-reviewer-mimo',
   [FREEBUFF_MINIMAX_MODEL_ID]: 'code-reviewer-minimax',
+  [FREEBUFF_MINIMAX_M3_MODEL_ID]: 'code-reviewer-minimax-m3',
   [FREEBUFF_KIMI_MODEL_ID]: 'code-reviewer-kimi',
   [FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID]: 'code-reviewer-deepseek',
   [FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID]: 'code-reviewer-deepseek-flash',
+  [FREEBUFF_GLM_V52_MODEL_ID]: 'code-reviewer-glm',
 }
 
 export function getFreebuffRootAgentIdForModel(model: string): string {
@@ -86,6 +107,22 @@ export const FREE_MODE_AGENT_MODELS: Record<string, Set<string>> = {
   'base2-free-mimo-pro': new Set([FREEBUFF_MIMO_V25_PRO_MODEL_ID]),
   'base2-free-mimo': new Set([FREEBUFF_MIMO_V25_MODEL_ID]),
   'base2-free-minimax-m3': new Set([FREEBUFF_MINIMAX_M3_MODEL_ID]),
+  'base2-free-glm': new Set([FREEBUFF_GLM_V52_MODEL_ID]),
+
+  // Freebuff Desktop's single hosted root agent — one root id across all its
+  // models (the user picks the model per tab), so it allows the full desktop
+  // picker set. Concurrency is still bounded elsewhere: the free-session
+  // admission gate caps premium-bucket models (incl. MiniMax M3) to one active
+  // session per user (premium_slot_taken), so "one premium model at a time" in
+  // full access holds regardless of this allowlist.
+  [FREEBUFF_DESKTOP_THREAD_AGENT_ID]: new Set([
+    FREEBUFF_MINIMAX_M3_MODEL_ID,
+    FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID,
+    FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+    FREEBUFF_KIMI_MODEL_ID,
+    FREEBUFF_MIMO_V25_PRO_MODEL_ID,
+    FREEBUFF_MIMO_V25_MODEL_ID,
+  ]),
 
   // File exploration agents
   'file-picker': new Set(['google/gemini-2.5-flash-lite']),
@@ -105,6 +142,7 @@ export const FREE_MODE_AGENT_MODELS: Record<string, Set<string>> = {
 
   // Code reviewer for free mode
   'code-reviewer-minimax': new Set([FREEBUFF_MINIMAX_MODEL_ID]),
+  'code-reviewer-minimax-m3': new Set([FREEBUFF_MINIMAX_M3_MODEL_ID]),
   'code-reviewer-kimi': new Set([FREEBUFF_KIMI_MODEL_ID]),
   'code-reviewer-deepseek': new Set([FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID]),
   'code-reviewer-deepseek-flash': new Set([
@@ -112,6 +150,7 @@ export const FREE_MODE_AGENT_MODELS: Record<string, Set<string>> = {
   ]),
   'code-reviewer-mimo-pro': new Set([FREEBUFF_MIMO_V25_PRO_MODEL_ID]),
   'code-reviewer-mimo': new Set([FREEBUFF_MIMO_V25_MODEL_ID]),
+  'code-reviewer-glm': new Set([FREEBUFF_GLM_V52_MODEL_ID]),
   // Legacy freebuff clients spawned code-reviewer-lite under provider-specific
   // free roots before those reviewer IDs existed.
   'code-reviewer-lite': new Set([
@@ -170,6 +209,19 @@ export function isFreebuffGeminiThinkerAgent(fullAgentId: string): boolean {
   if (!agentId) return false
   if (publisherId && publisherId !== 'codebuff') return false
   return agentId === FREEBUFF_GEMINI_THINKER_AGENT_ID
+}
+
+/**
+ * True if this agent is permitted to call the premium Gemini Pro model — i.e.
+ * one of the two gemini-thinker subagents (CLI `thinker-with-files-gemini` or
+ * chat `thinker-gemini`). Publisher-spoof-safe like the other gates: a
+ * non-codebuff publisher never matches.
+ */
+export function isFreebuffGeminiProAgent(fullAgentId: string): boolean {
+  const { publisherId, agentId } = parseAgentId(fullAgentId)
+  if (!agentId) return false
+  if (publisherId && publisherId !== 'codebuff') return false
+  return FREEBUFF_GEMINI_PRO_AGENT_IDS.has(agentId)
 }
 
 export function shouldUseLocalTokenCountForFreebuffDeepseekFlash(params: {

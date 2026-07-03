@@ -1,10 +1,11 @@
 import { TextAttributes } from '@opentui/core'
 import { useKeyboard, useRenderer } from '@opentui/react'
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 
 import { Button } from './button'
 import { ChoiceAdBanner, AD_CARD_HEIGHT } from './ad-banner'
 import { FreebuffModelSelector } from './freebuff-model-selector'
+import { FreebuffReferralBanner } from './freebuff-referral-banner'
 import { ShimmerText } from './shimmer-text'
 import {
   refreshFreebuffLandingMetadata,
@@ -23,17 +24,25 @@ import {
   formatFreebuffPremiumResetCountdown,
   getFreebuffPremiumResetAt,
 } from '../utils/freebuff-premium-reset'
+import {
+  FREEBUFF_STREAK_WEEK,
+  getFreebuffStreakBonusNote,
+  getFreebuffStreakLine,
+} from '../utils/freebuff-streak-line'
 import { formatSessionUnits } from '../utils/format-session-units'
 import { isPlainEnterKey } from '../utils/terminal-enter-detection'
 import { getLogoAccentColor, getLogoBlockColor } from '../utils/theme-system'
+import { INVERTED_CTA_FG } from '../utils/ui-constants'
 import {
   FREEBUFF_ENABLE_STREAK_IN_UI,
   FREEBUFF_LIMITED_SESSION_LIMIT,
   FREEBUFF_PREMIUM_SESSION_LIMIT,
 } from '@codebuff/common/constants/freebuff-models'
-import { getRateLimitsByModel } from '@codebuff/common/types/freebuff-session'
+import {
+  getRateLimitsByModel,
+  getReferralInfo,
+} from '@codebuff/common/types/freebuff-session'
 import { formatFreebuffHardBlockedPrivacySignals } from '@codebuff/common/util/freebuff-privacy'
-import { pluralize } from '@codebuff/common/util/string'
 
 import type { FreebuffSessionResponse } from '../types/freebuff-session'
 import type { FreebuffIpPrivacySignal } from '@codebuff/common/types/freebuff-session'
@@ -44,25 +53,10 @@ interface WaitingRoomScreenProps {
   error: string | null
 }
 
-const formatWait = (ms: number): string => {
-  if (!Number.isFinite(ms) || ms <= 0) return 'any moment now'
-  const totalSeconds = Math.round(ms / 1000)
-  if (totalSeconds < 60) return `~${totalSeconds}s`
-  const minutes = Math.round(totalSeconds / 60)
-  if (minutes < 60) return `~${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  const rem = minutes % 60
-  return rem === 0 ? `~${hours}h` : `~${hours}h ${rem}m`
-}
-
-const formatElapsed = (ms: number): string => {
-  if (!Number.isFinite(ms) || ms < 0) return '0s'
-  const totalSeconds = Math.floor(ms / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes === 0) return `${seconds}s`
-  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`
-}
+/** Landing-screen heading. Referenced both as rendered text and by the
+ *  picker's height-budget math (wrappedRows), so it lives in one place to keep
+ *  the two from drifting. */
+const LANDING_HEADING = 'Start coding for free'
 
 /** "in ~3h 20m" / "in ~45 min" / "in under a minute". Used on the
  *  rate-limited screen so users know when they can try again. */
@@ -107,11 +101,31 @@ const formatPrivacySignalList = (
   return `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`
 }
 
-const getLimitedModeReason = (
+/** "BR" → "Brazil". Falls back to the raw code when the runtime can't
+ *  resolve it (malformed code, missing ICU data). */
+const formatCountryName = (countryCode: string): string => {
+  try {
+    return (
+      new Intl.DisplayNames(['en'], { type: 'region' }).of(countryCode) ??
+      countryCode
+    )
+  } catch {
+    return countryCode
+  }
+}
+
+// Tone matters here: this is shown to users who, through no fault of their
+// own, get the smaller model set. Frame it as model *availability* ("aren't
+// available in BR yet"), never as restricted *access* ("limited mode",
+// "blocked") — clear enough to answer "why these models?" for someone who
+// goes looking, quiet enough to ignore for someone who doesn't. The VPN case
+// is the one the user can act on, so it leads with the action. Rendered
+// directly under the model list — that's where "why these models?" gets asked.
+const getLimitedModeNotice = (
   session: FreebuffSessionResponse | null,
 ): string | null => {
   if (!session || !('countryBlockReason' in session)) {
-    return 'reduced free model access'
+    return "Some models aren't available on this connection"
   }
 
   const countryCode =
@@ -123,19 +137,21 @@ const getLimitedModeReason = (
 
   switch (session.countryBlockReason) {
     case 'anonymous_network':
-      return `${formatPrivacySignalList(
+      return `Using a ${formatPrivacySignalList(
         session.ipPrivacySignals ?? undefined,
-      )} detected`
+      )}? More models are available on a direct connection`
     case 'country_not_allowed':
-      return `based on detected country${countryCode ? `: ${countryCode}` : ''}`
+      return `Some models aren't available in ${
+        countryCode ? formatCountryName(countryCode) : 'your region'
+      } yet`
     case 'anonymized_or_unknown_country':
     case 'missing_client_ip':
     case 'unresolved_client_ip':
-      return 'location could not be verified'
+      return "We couldn't confirm your region, so we're showing models available everywhere"
     case 'ip_privacy_lookup_failed':
-      return 'network check could not finish'
+      return "We couldn't finish a network check, so we're showing models available everywhere"
     default:
-      return 'reduced free model access'
+      return "Some models aren't available on this connection"
   }
 }
 
@@ -224,7 +240,9 @@ const TakeoverPrompt: React.FC = () => {
         >
           <text
             style={{
-              fg: isTakeoverFocused ? theme.background : theme.foreground,
+              // theme.background is 'transparent' and can't serve as inverted
+              // text — on the green fill it renders the label invisible.
+              fg: isTakeoverFocused ? INVERTED_CTA_FG : theme.foreground,
               bg: isTakeoverFocused ? theme.primary : undefined,
             }}
             attributes={TextAttributes.BOLD}
@@ -255,29 +273,31 @@ const TakeoverPrompt: React.FC = () => {
 }
 
 /** Inline streak indicator rendered as the line immediately after the
- *  sessions-used/title row. Shows "Streak: N days" when the user has a
- *  streak; for streak === 0 the row is rendered blank so the picker
- *  doesn't jump once they earn their first day. */
+ *  sessions-used/title row. Shows "N day streak" with a week of filled/empty
+ *  progress dots; for streak === 0 the row is rendered blank so new / lapsed
+ *  users are nudged to start using the product rather than shown an empty
+ *  streak (and so the picker doesn't jump once they earn their first day). */
 const StreakInlineLine: React.FC<{
   streak: number
-  marginBottom: number
-}> = ({ streak, marginBottom }) => {
+  marginTop: number
+}> = ({ streak, marginTop }) => {
   const theme = useTheme()
+  const line = getFreebuffStreakLine(streak)
 
-  if (streak <= 0) {
-    return <text style={{ marginBottom, flexShrink: 0 }}> </text>
+  if (!line) {
+    return <text style={{ marginTop, flexShrink: 0 }}> </text>
   }
 
   return (
     <text
       style={{
-        fg: theme.muted,
-        marginBottom,
+        marginTop,
         flexShrink: 0,
         wrapMode: 'none',
       }}
     >
-      Streak: {pluralize(streak, 'day')}
+      <span fg={theme.foreground}>{line.label}</span>
+      <span fg={theme.primary}>{`  ${line.dots}`}</span>
     </text>
   )
 }
@@ -293,14 +313,36 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
 
   // Progressive disclosure as the terminal gets shorter. The picker is the
   // only thing the user must be able to reach, so chrome is shed first:
-  //   tall   (>=26): full ASCII logo + roomy spacing, content anchored low
-  //   medium (>=18): one-line text logo, tightened spacing, content up top
-  //   short  (<18) : no logo at all
-  //   tiny   (<15) : also drop the ad banner
+  //   tall   (>=40): full 6-line ASCII logo + roomy spacing, content anchored low
+  //   medium (>=20): one-line text wordmark — keeps branding for ~1 row so the
+  //                  model list (esp. expanded) gets ~6 rows back vs the big logo
+  //   short  (<20) : no logo at all
+  //   tiny   (<18) : also drop the ad banner
+  // The big logo is reserved for genuinely tall windows; at the common ~30-row
+  // height we show the compact wordmark so more models fit without scrolling.
   // Section headers always show — the picker scrolls within whatever rows
   // remain (see selectorMaxHeight below), so there's no need to hide them.
-  const logoMode: 'full' | 'text' | 'none' =
-    terminalHeight >= 30 ? 'full' : ('none' as 'none' | 'text')
+  //
+  // Exception: when the picker is collapsed it shrinks to ~5 rows, freeing the
+  // ~6 rows the big logo needs. So on a mid-height window with a collapsed
+  // picker we promote the wordmark back to the full ASCII logo — it fills what
+  // would otherwise be dead space above the card. Expanding the list reclaims
+  // those rows and drops back to the wordmark. 26 is the smallest window where
+  // the logo block, heading, collapsed picker, streak, and ad all coexist
+  // without the picker needing to scroll.
+  //
+  // The picker (rendered below) owns this and reports it via onExpandedChange;
+  // we default to collapsed so the first paint reserves logo space correctly.
+  const [selectorExpanded, setSelectorExpanded] = useState(false)
+  const COLLAPSED_LOGO_MIN_HEIGHT = 26
+  const fullLogoFits =
+    terminalHeight >= 40 ||
+    (!selectorExpanded && terminalHeight >= COLLAPSED_LOGO_MIN_HEIGHT)
+  const logoMode: 'full' | 'text' | 'none' = fullLogoFits
+    ? 'full'
+    : terminalHeight >= 20
+      ? 'text'
+      : 'none'
   const compact = terminalHeight < 22
   const showAds = terminalHeight >= 18
   const textMarginBottom = 1
@@ -341,34 +383,43 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
 
   const [exitHover, setExitHover] = useState(false)
 
-  const isQueued = session?.status === 'queued'
   const accessTier =
     session && 'accessTier' in session ? session.accessTier : 'full'
-  const limitedModeReason =
-    accessTier === 'limited' ? getLimitedModeReason(session) : null
-  // 'none' = user hasn't joined any queue yet. We're in the pre-chat landing
-  // state: show the picker with live N-in-line hints and a prompt. Picking a
-  // model triggers joinFreebuffQueue, which POSTs and transitions us to
-  // 'queued' (waiting room) or straight to 'active' (chat) if no wait.
+  // Hidden in compact terminals: the notice is nice-to-have context, and
+  // below 22 rows every line competes with the picker itself.
+  const limitedModeNotice =
+    accessTier === 'limited' && !compact ? getLimitedModeNotice(session) : null
+  // 'none' = user hasn't started a session yet. We're in the pre-chat landing
+  // state: show the picker with a prompt. Picking a model triggers
+  // joinFreebuffQueue, which POSTs and transitions straight to 'active' (chat).
   const isLanding = session?.status === 'none'
   const streakQuery = useFreebuffStreakQuery({
-    enabled: FREEBUFF_ENABLE_STREAK_IN_UI && (isLanding || isQueued),
+    enabled: FREEBUFF_ENABLE_STREAK_IN_UI && isLanding,
   })
   const streak = streakQuery.data?.streak ?? 0
   // Reserve the streak row whenever the feature could appear so the picker
   // doesn't jump when the query resolves or the user crosses from 0 → 1.
   // The component itself renders blank space when streak === 0.
   const reserveStreakSlot =
-    FREEBUFF_ENABLE_STREAK_IN_UI && (isLanding || isQueued) && !compact
-  // Elapsed-in-queue timer. Starts from `queuedAt` so it keeps ticking even if
-  // the user wanders away and comes back. On the landing picker we tick once a
-  // minute so the session reset countdown stays fresh.
-  const queuedAtMs = useMemo(() => {
-    if (session?.status === 'queued') return Date.parse(session.queuedAt)
-    return null
-  }, [session])
-  const now = useNow(isQueued ? 1000 : 60_000, isQueued || isLanding)
-  const elapsedMs = queuedAtMs ? now - queuedAtMs : 0
+    FREEBUFF_ENABLE_STREAK_IN_UI && isLanding && !compact
+  // Once a full week is earned, explain the recurring perk under the picker so
+  // the streak reads as worth keeping. Accuracy lives in getFreebuffStreakBonusNote
+  // (recurring "each week" framing, GLM only for full access).
+  const streakBonusNote = reserveStreakSlot
+    ? getFreebuffStreakBonusNote({
+        streak,
+        accessTier: accessTier === 'limited' ? 'limited' : 'full',
+      })
+    : null
+  // On the landing screen the streak rides on the heading row, right-aligned.
+  // Below ~50 cols the heading + dots get squashed together, so drop the streak
+  // to its own line under the heading instead.
+  const STREAK_INLINE_MIN_WIDTH = 50
+  const streakOnHeadingRow =
+    reserveStreakSlot && isLanding && contentMaxWidth >= STREAK_INLINE_MIN_WIDTH
+  // On the landing picker we tick once a minute so the session reset countdown
+  // stays fresh.
+  const now = useNow(60_000, isLanding)
 
   // Free-session quota counter for the title line. All free models share one
   // pool; the server replicates the same snapshot under each free model
@@ -379,6 +430,17 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
     ? Object.values(rateLimitsByModel)[0]
     : undefined
   const sharedSessionUsed = sessionRateLimit?.recentCount ?? 0
+  // Hide the "0 of 5 … used" line entirely for a fresh user — a zeroed counter
+  // is noise on the landing screen. It appears once any session is consumed.
+  //
+  // For the regular tiers the PREMIUM section header inside the picker now
+  // carries this quota inline, so the below-picker line only survives for the
+  // limited tier (which has no premium section to host it). Regular tiers don't
+  // need it when collapsed either — the collapsed recommended model is
+  // unlimited, so a premium-session count there is irrelevant.
+  const showSessionCounter = sharedSessionUsed > 0
+  const showBelowPickerCounter =
+    showSessionCounter && accessTier === 'limited'
   const isSessionExhausted =
     sharedSessionUsed >=
     (accessTier === 'limited'
@@ -389,7 +451,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
     accessTier === 'limited'
       ? FREEBUFF_LIMITED_SESSION_LIMIT
       : FREEBUFF_PREMIUM_SESSION_LIMIT
-  const sessionLabel = 'premium sessions'
+  const sessionLabel = accessTier === 'limited' ? 'sessions' : 'premium sessions'
   const formattedSharedSessionUsed = formatSessionUnits(sharedSessionUsed)
   const sessionResetAt = getFreebuffPremiumResetAt({
     rateLimitsByModel,
@@ -409,7 +471,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
   //   - ad banner: AD_CARD_HEIGHT, only when shown
   //   - main box: its paddingTop (text-logo tier only) + paddingBottom 1
   //   - logo block: lines + marginBottom 1 (always, when shown) + gap (full)
-  //   - the prompt/counter (landing) or the position panel (queued)
+  //   - the prompt/counter (landing)
   // Line wrapping is derived from the actual strings vs contentMaxWidth, so
   // a wrapped counter is accounted for precisely instead of guessed at.
   const wrappedRows = (text: string) =>
@@ -423,32 +485,55 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
       : logoLines + 1 /* marginBottom */ + (logoMode === 'full' ? 1 : 0)
   const mainPaddingRows = (logoMode === 'text' ? 1 : 0) + 1
   const adRows = showAds ? AD_CARD_HEIGHT : 0
-  // Streak is rendered inline as a one-line row directly under the counter
-  // (landing) or title (queued), with the same bottom margin as its neighbor
-  // so the picker still sits flush below it.
-  const streakLandingRows = reserveStreakSlot ? 1 + textMarginBottom : 0
-  const streakQueuedRows = reserveStreakSlot ? 1 + 1 : 0
+  // Status lines render below the picker, each with marginTop 1: the session
+  // counter (landing only), then the limited-mode notice, then the streak.
+  // They still eat into the picker's height budget regardless of being above
+  // or below it. Placement varies: on a wide landing screen the streak shares
+  // the heading row (0 extra rows, already counted in landingTextRows); on a
+  // narrow landing screen it drops to its own line under the heading (1 row,
+  // no top margin).
+  const streakRows = !reserveStreakSlot ? 0 : streakOnHeadingRow ? 0 : 1
+  const noticeRows = limitedModeNotice
+    ? 1 /* marginTop */ + wrappedRows(limitedModeNotice)
+    : 0
+  // Streak perk note (landing, streak >= 7): one marginTop row + wrap.
+  const streakBonusRows = streakBonusNote
+    ? 1 /* marginTop */ + wrappedRows(streakBonusNote)
+    : 0
+  // GLM referral banner (landing, full tier). Reserve the rows it occupies so
+  // the scrollbox shrinks to make room — under-reserving lets the landing
+  // content overflow the terminal height, and the flex column then squashes the
+  // banner so its bordered button overlaps the line above it. Both the copy and
+  // "Use GLM 5.2" controls are bordered boxes (3 rows), so count those rows.
+  const referralInfo = isLanding ? getReferralInfo(session) : undefined
+  const referralBannerRows = !referralInfo
+    ? 0
+    : accessTier === 'limited'
+      ? // Limited daily-session referral: marginTop 1 + the invite line (wraps
+        // to two rows) + the bordered "Copy invite link" button (3 rows).
+        1 + 2 + 3
+      : (referralInfo.weeklySessionsRemaining ?? 0) > 0
+        ? // Unlocked card: marginTop 1 + border 2 + status 1 + the bordered
+          // action-button row 3 + optional connect-github row.
+          1 + 2 + 1 + 3 + (referralInfo.githubLinked ? 0 : 1)
+        : // Locked: marginTop 1 + the invite line (wraps to two rows now that it
+          // carries the full "most powerful open-source model" pitch) + the
+          // bordered "Copy invite link" button (3 rows).
+          1 + 2 + 3
+  const belowPickerRows =
+    streakRows + noticeRows + streakBonusRows + referralBannerRows
+  const counterRows = showBelowPickerCounter
+    ? 1 /* marginTop */ + wrappedRows(counterText)
+    : 0
   const reservedChrome = 2 + adRows + mainPaddingRows + logoBlockRows
   const landingTextRows =
-    wrappedRows('Pick a model to start') +
+    wrappedRows(LANDING_HEADING) +
     textMarginBottom +
-    wrappedRows(counterText) +
-    textMarginBottom +
-    streakLandingRows
-  const queuedTitleText =
-    session?.status === 'queued' && session.position === 1
-      ? "You're next in line"
-      : "You're in the waiting room"
-  const queuedTextRows =
-    wrappedRows(queuedTitleText) +
-    1 +
-    4 /* position panel */ +
-    streakQueuedRows
+    counterRows +
+    belowPickerRows
   const selectorMaxHeight = Math.max(
     3,
-    terminalHeight -
-    reservedChrome -
-    (isQueued ? queuedTextRows : landingTextRows),
+    terminalHeight - reservedChrome - landingTextRows,
   )
 
   useEffect(() => {
@@ -485,16 +570,9 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
           flexShrink: 0,
         }}
       >
-        <box>
-          {limitedModeReason && (
-            <text style={{ fg: theme.muted, wrapMode: 'word' }}>
-              <span fg={theme.secondary} attributes={TextAttributes.BOLD}>
-                Limited mode
-              </span>
-              <span fg={theme.muted}> · {limitedModeReason}</span>
-            </text>
-          )}
-        </box>
+        {/* Empty spacer: justifyContent space-between needs a left sibling to
+            keep the ✕ pushed to the right. */}
+        <box />
         <Button
           onClick={exitFreebuffCleanly}
           onMouseOver={() => setExitHover(true)}
@@ -515,11 +593,18 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
           flexGrow: 1,
           flexDirection: 'column',
           alignItems: 'center',
-          // With the full logo we anchor the clump low (flex-end), matching how
-          // chat pins its header/messages to the input bar. Once the logo is
-          // shrunk/hidden on shorter terminals, anchoring low just leaves a big
-          // dead band under the top bar — so hug the top instead.
-          justifyContent: logoMode === 'full' ? 'flex-end' : 'flex-start',
+          // Full logo: anchor the clump low (flex-end), matching how chat pins
+          // its header/messages to the input bar. Text wordmark: center the
+          // clump so a short (collapsed) picker reads as a balanced card instead
+          // of leaving a void above the ad. No logo (tiny terminals): hug the
+          // top, since the content nearly fills the height anyway and centering
+          // would just shave rows off the top.
+          justifyContent:
+            logoMode === 'full'
+              ? 'flex-end'
+              : logoMode === 'text'
+                ? 'center'
+                : 'flex-start',
           paddingLeft: 2,
           paddingRight: 2,
           // A row of breathing room under the top bar for the text logo; the
@@ -564,106 +649,72 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
                 gap: 0,
               }}
             >
-              <text
+              <box
                 style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  alignSelf: 'stretch',
                   marginBottom: textMarginBottom,
-                  wrapMode: 'word',
                 }}
               >
-                <span fg={theme.foreground} attributes={TextAttributes.BOLD}>
-                  Pick a model to start
-                </span>
-              </text>
-              <text
-                style={{
-                  fg: theme.muted,
-                  marginBottom: textMarginBottom,
-                  wrapMode: 'word',
-                }}
-              >
-                <span fg={sessionUsedColor}>
-                  {formattedSharedSessionUsed} of {sessionLimit} {sessionLabel}{' '}
-                  used
-                </span>
-                <span fg={theme.muted}>
-                  {', '}
-                  resets in {sessionResetCountdown}
-                </span>
-              </text>
-              {reserveStreakSlot && !compact && (
-                <StreakInlineLine
-                  streak={streak}
-                  marginBottom={textMarginBottom}
-                />
+                <text style={{ wrapMode: 'word' }}>
+                  <span fg={theme.foreground} attributes={TextAttributes.BOLD}>
+                    {LANDING_HEADING}
+                  </span>
+                </text>
+                {streakOnHeadingRow && (
+                  <StreakInlineLine streak={streak} marginTop={0} />
+                )}
+              </box>
+              {reserveStreakSlot && !streakOnHeadingRow && (
+                <StreakInlineLine streak={streak} marginTop={0} />
               )}
-              <FreebuffModelSelector maxHeight={selectorMaxHeight} />
+              <FreebuffModelSelector
+                maxHeight={selectorMaxHeight}
+                onExpandedChange={setSelectorExpanded}
+              />
+              {showBelowPickerCounter && (
+                <text
+                  style={{
+                    fg: theme.muted,
+                    marginTop: 1,
+                    wrapMode: 'word',
+                  }}
+                >
+                  <span fg={sessionUsedColor}>
+                    {formattedSharedSessionUsed} of {sessionLimit} {sessionLabel}{' '}
+                    used
+                  </span>
+                  <span fg={theme.muted}>
+                    {', '}
+                    resets in {sessionResetCountdown}
+                  </span>
+                </text>
+              )}
+              {limitedModeNotice && (
+                <text
+                  style={{ fg: theme.muted, wrapMode: 'word', marginTop: 1 }}
+                >
+                  {limitedModeNotice}
+                </text>
+              )}
+              {streakBonusNote && (
+                <text
+                  style={{ fg: theme.primary, wrapMode: 'word', marginTop: 1 }}
+                >
+                  {streakBonusNote}
+                </text>
+              )}
+              <FreebuffReferralBanner />
             </box>
           )}
 
           {session?.status === 'takeover_prompt' && <TakeoverPrompt />}
 
-          {isQueued && session && (
-            <box
-              style={{
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: 0,
-              }}
-            >
-              <text
-                style={{
-                  fg: theme.foreground,
-                  marginBottom: 1,
-                }}
-                attributes={TextAttributes.BOLD}
-              >
-                {queuedTitleText}
-              </text>
-              {reserveStreakSlot && (
-                <StreakInlineLine streak={streak} marginBottom={1} />
-              )}
-
-              <FreebuffModelSelector maxHeight={selectorMaxHeight} />
-
-              <box
-                style={{
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  gap: 0,
-                  marginTop: 1,
-                }}
-              >
-                <text style={{ fg: theme.foreground, alignSelf: 'flex-start' }}>
-                  <span fg={theme.muted}>Position </span>
-                  <span fg={theme.primary} attributes={TextAttributes.BOLD}>
-                    {session.position}
-                  </span>
-                  <span fg={theme.muted}> / {session.queueDepth}</span>
-                </text>
-                <text style={{ fg: theme.muted, alignSelf: 'flex-start' }}>
-                  <span>Wait </span>
-                  {session.position === 1
-                    ? 'any moment now'
-                    : formatWait(session.estimatedWaitMs)}
-                </text>
-                <text style={{ fg: theme.muted, alignSelf: 'flex-start' }}>
-                  <span>Elapsed </span>
-                  {formatElapsed(elapsedMs)}
-                </text>
-              </box>
-            </box>
-          )}
-
-          {/* Server says the waiting room is disabled — this screen should not
-              normally render in that case, but show a minimal message just in
-              case App.tsx's guard is bypassed. */}
-          {session?.status === 'disabled' && (
-            <text style={{ fg: theme.muted }}>Waiting room disabled.</text>
-          )}
-
           {/* Country outside the free-mode allowlist. Terminal — polling has
-              stopped. Tell the user up front rather than letting them wait in
-              the queue only to be rejected at the chat/completions gate. */}
+              stopped. Tell the user up front rather than letting them send a
+              request that the chat/completions gate would reject. */}
           {session?.status === 'country_blocked' && (
             <>
               <text style={{ fg: theme.secondary, marginBottom: 1 }}>
@@ -708,8 +759,7 @@ export const WaitingRoomScreen: React.FC<WaitingRoomScreenProps> = ({
           )}
 
           {/* Account banned. Terminal — polling has stopped. Blocking here
-              stops banned bots from re-entering the queue every few seconds
-              and inflating queueDepth between admission-tick sweeps. */}
+              stops banned bots from re-entering free mode. */}
           {session?.status === 'banned' && (
             <>
               <text style={{ fg: theme.secondary, marginBottom: 1 }}>

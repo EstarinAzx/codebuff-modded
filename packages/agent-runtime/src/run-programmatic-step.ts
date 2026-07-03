@@ -7,7 +7,6 @@ import { clearProposedContentForRun } from './tools/handlers/tool/proposed-conte
 import { executeToolCall } from './tools/tool-executor'
 import { parseTextWithToolCalls } from './util/parse-tool-calls-from-text'
 
-
 import type { FileProcessingState } from './tools/handlers/tool/write-file'
 import type { ExecuteToolCallParams } from './tools/tool-executor'
 import type { ParsedSegment } from './util/parse-tool-calls-from-text'
@@ -34,6 +33,12 @@ import type { AgentState } from '@codebuff/common/types/session-state'
 // Maintains generator state for all agents. Generator state can't be serialized, so we store it in memory.
 const runIdToGenerator: Record<string, StepGenerator | undefined> = {}
 export const runIdToStepAll: Set<string> = new Set()
+type HandleStepsFn = Exclude<AgentTemplate['handleSteps'], string | undefined>
+
+function deserializeHandleSteps(source: string): HandleStepsFn {
+  const globalEval = eval as unknown as (code: string) => unknown
+  return globalEval(`(${source})`) as HandleStepsFn
+}
 
 // Function to clear the generator cache for testing purposes
 export function clearAgentGeneratorCache(params: { logger: Logger }) {
@@ -42,6 +47,20 @@ export function clearAgentGeneratorCache(params: { logger: Logger }) {
     delete runIdToGenerator[key]
   }
   runIdToStepAll.clear()
+}
+
+/**
+ * Release all module-level state held for a run: the handleSteps generator
+ * (whose closure retains the full agent state and message history), the
+ * STEP_ALL flag, and any proposed file content. Safe to call for runs with
+ * no programmatic state. Must run whenever a run's loop exits — including
+ * abort and error paths, not just endTurn — or the state leaks for the
+ * lifetime of the process.
+ */
+export function clearProgrammaticRunState(runId: string): void {
+  delete runIdToGenerator[runId]
+  runIdToStepAll.delete(runId)
+  clearProposedContentForRun(runId)
 }
 
 // Function to handle programmatic agents
@@ -138,16 +157,16 @@ export async function runProgrammaticStep(
   if (!generator) {
     const createLogMethod =
       (level: 'debug' | 'info' | 'warn' | 'error') =>
-        (data: any, msg?: string) => {
-          logger[level](data, msg) // Log to backend
-          handleStepsLogChunk({
-            userInputId,
-            runId: agentState.runId ?? 'undefined',
-            level,
-            data,
-            message: msg,
-          })
-        }
+      (data: any, msg?: string) => {
+        logger[level](data, msg) // Log to backend
+        handleStepsLogChunk({
+          userInputId,
+          runId: agentState.runId ?? 'undefined',
+          level,
+          data,
+          message: msg,
+        })
+      }
 
     const streamingLogger = {
       debug: createLogMethod('debug'),
@@ -156,10 +175,15 @@ export async function runProgrammaticStep(
       error: createLogMethod('error'),
     }
 
+    // Prefer the live function when present: the stringified form of a
+    // bundled function can reference out-of-scope bundler helpers (esbuild
+    // keepNames' `__name`, minified to a bare identifier), which makes the
+    // eval'd generator throw ReferenceError on its first step.
     const generatorFn =
-      typeof template.handleSteps === 'string'
-        ? eval(`(${template.handleSteps})`)
-        : template.handleSteps
+      template.handleStepsFn ??
+      (typeof template.handleSteps === 'string'
+        ? deserializeHandleSteps(template.handleSteps)
+        : template.handleSteps)
 
     // Initialize native generator
     generator = generatorFn({
@@ -244,7 +268,7 @@ export async function runProgrammaticStep(
       if (!parseResult.success) {
         throw new Error(
           `Invalid yield value from handleSteps in agent ${template.id}: ${parseResult.error.message}. ` +
-          `Received: ${JSON.stringify(result.value)}`,
+            `Received: ${JSON.stringify(result.value)}`,
         )
       }
 
@@ -335,8 +359,19 @@ export async function runProgrammaticStep(
   } catch (error) {
     endTurn = true
 
-    const errorMessage = `Error executing handleSteps for agent ${template.id}: ${error instanceof Error ? error.message : 'Unknown error'
-      }`
+    // A ReferenceError from an eval'd handleSteps string almost always means
+    // the source was serialized from a bundled/minified function and
+    // references an out-of-scope bundler helper. Call it out so the failure
+    // is diagnosable from the message alone.
+    const minifiedSourceHint =
+      error instanceof ReferenceError &&
+      !template.handleStepsFn &&
+      typeof template.handleSteps === 'string'
+        ? ' (handleSteps was deserialized from a string that references an out-of-scope identifier — likely a minified bundle serialized the function; ship the live function or unminified source)'
+        : ''
+    const errorMessage = `Error executing handleSteps for agent ${template.id}: ${
+      error instanceof Error ? error.message : 'Unknown error'
+    }${minifiedSourceHint}`
     logger.error(
       { error: getErrorObject(error), template: template.id },
       errorMessage,
@@ -376,9 +411,7 @@ export async function runProgrammaticStep(
     }
   } finally {
     if (endTurn) {
-      delete runIdToGenerator[agentState.runId]
-      runIdToStepAll.delete(agentState.runId)
-      clearProposedContentForRun(agentState.runId)
+      clearProgrammaticRunState(agentState.runId)
     }
   }
 }

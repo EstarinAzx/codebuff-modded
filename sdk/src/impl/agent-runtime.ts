@@ -4,6 +4,8 @@ import { getCiEnv } from '@codebuff/common/env-ci'
 import { shouldTrackAnalyticsEvent } from '@codebuff/common/util/analytics-sampling'
 import { success } from '@codebuff/common/util/error'
 
+import { getWebsiteUrl } from '../constants'
+
 import {
   addAgentStep,
   fetchAgentFromDatabase,
@@ -18,12 +20,14 @@ import type {
   AgentRuntimeDeps,
   AgentRuntimeScopedDeps,
 } from '@codebuff/common/types/contracts/agent-runtime'
+import type { AgentTemplate } from '@codebuff/common/types/agent-template'
 import type {
   DatabaseAgentCache,
   StartAgentRunFn,
 } from '@codebuff/common/types/contracts/database'
 import type { ClientEnv } from '@codebuff/common/types/contracts/env'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
+import type { TraceWriter } from '@codebuff/common/types/contracts/trace'
 import type { TrackEventFn } from '@codebuff/common/types/contracts/analytics'
 
 // Fork-aware startAgentRun: when codebuff.com run-tracking returns null
@@ -37,11 +41,30 @@ const forkAwareStartAgentRun: StartAgentRunFn = async (params) => {
   return getForkHooks().synthRunId?.(params.agentId) ?? null
 }
 
-const databaseAgentCache: DatabaseAgentCache = new Map()
+const DATABASE_AGENT_CACHE_MAX_ENTRIES = 200
+
+/** Insertion-order (FIFO) eviction so the cache can't grow without bound in
+ *  long-lived processes (e.g. the freebuff chat server, which runs the agent
+ *  runtime in-process). Templates are large — prompts plus handleSteps source. */
+class BoundedAgentCache extends Map<string, AgentTemplate | null> {
+  override set(key: string, value: AgentTemplate | null): this {
+    if (!this.has(key)) {
+      while (this.size >= DATABASE_AGENT_CACHE_MAX_ENTRIES) {
+        const oldestKey = this.keys().next().value
+        if (oldestKey === undefined) break
+        this.delete(oldestKey)
+      }
+    }
+    return super.set(key, value)
+  }
+}
+
+const databaseAgentCache: DatabaseAgentCache = new BoundedAgentCache()
 
 export function getAgentRuntimeImpl(
   params: {
     logger?: Logger
+    traceWriter?: TraceWriter
     apiKey: string
     clientEnv?: ClientEnv
   } & Pick<
@@ -57,8 +80,9 @@ export function getAgentRuntimeImpl(
 ): AgentRuntimeDeps & AgentRuntimeScopedDeps {
   const {
     logger,
+    traceWriter,
     apiKey,
-    clientEnv = clientEnvDefault,
+    clientEnv: clientEnvInput,
     handleStepsLogChunk,
     requestToolCall,
     requestMcpToolData,
@@ -67,6 +91,11 @@ export function getAgentRuntimeImpl(
     sendAction,
     sendSubagentChunk,
   } = params
+
+  const clientEnv: ClientEnv = {
+    ...(clientEnvInput ?? clientEnvDefault),
+    NEXT_PUBLIC_CODEBUFF_APP_URL: getWebsiteUrl(),
+  }
 
   const trackSdkRuntimeEvent: TrackEventFn = (eventParams) => {
     if (
@@ -114,6 +143,7 @@ export function getAgentRuntimeImpl(
 
     // Other
     logger: logger ?? noopLogger,
+    traceWriter,
     fetch: globalThis.fetch,
 
     // Client (WebSocket)

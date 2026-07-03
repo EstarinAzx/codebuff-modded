@@ -1,6 +1,5 @@
 import {
   createPostHogClient,
-  generateAnonymousId,
   type AnalyticsClientWithIdentify,
   type PostHogClientOptions,
 } from '@codebuff/common/analytics-core'
@@ -10,8 +9,12 @@ import {
   DEBUG_ANALYTICS,
 } from '@codebuff/common/env'
 import { shouldTrackAnalyticsEvent } from '@codebuff/common/util/analytics-sampling'
+import { shouldMirrorAnalyticsEvent } from '@codebuff/common/util/log-mirror'
 
-import type { AnalyticsEvent } from '@codebuff/common/constants/analytics-events'
+import { getOrCreatePersistentAnonymousId } from './anonymous-id'
+import { enqueueClientLog } from './log-shipper'
+
+import { AnalyticsEvent } from '@codebuff/common/constants/analytics-events'
 
 
 // Re-export types from core for backwards compatibility
@@ -70,7 +73,7 @@ function resolveDeps(): ResolvedAnalyticsDeps {
     isProd: injectedDeps?.isProd ?? defaultIsProd,
     createClient: injectedDeps?.createClient ?? createPostHogClient,
     generateAnonymousId:
-      injectedDeps?.generateAnonymousId ?? generateAnonymousId,
+      injectedDeps?.generateAnonymousId ?? getOrCreatePersistentAnonymousId,
   }
 }
 
@@ -219,6 +222,26 @@ export function trackEvent(
       event,
       properties,
     })
+  }
+
+  // Mirror analytics events into the Axiom logs sink too (PostHog stays the
+  // product-analytics source of truth). The shipper batches and ships even
+  // before login (anonymously), so pre-auth events like app_launched reach
+  // Axiom — making install→login funnels queryable in APL. We correlate on the
+  // anonymous/run id so pre- and post-login events join. CLI_LOG is excluded
+  // because the logger already mirrors log rows to Axiom (avoids double-ship).
+  if (event !== AnalyticsEvent.CLI_LOG && shouldMirrorAnalyticsEvent(event)) {
+    try {
+      enqueueClientLog({
+        level: 'info',
+        event,
+        message: event,
+        client_session_id: anonymousId ?? currentUserId,
+        data: properties,
+      })
+    } catch {
+      // Best-effort mirror; never let it affect analytics or the app.
+    }
   }
 }
 

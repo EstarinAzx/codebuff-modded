@@ -14,6 +14,10 @@ const SAMPLED_EVENT_RATES: Partial<Record<AnalyticsEvent, number>> = {
 }
 
 const ALWAYS_TRACK_EVENTS = new Set<AnalyticsEvent>([
+  // DAU is measured from MESSAGE_SENT, so it must never be sampled.
+  AnalyticsEvent.MESSAGE_SENT,
+  // Engaged-time is summed from event counts, so it must never be sampled.
+  AnalyticsEvent.PRODUCT_ACTIVE_MINUTE,
   AnalyticsEvent.APP_LAUNCHED,
   AnalyticsEvent.CHANGE_DIRECTORY,
   AnalyticsEvent.CHATGPT_OAUTH_AUTH_ERROR,
@@ -22,6 +26,21 @@ const ALWAYS_TRACK_EVENTS = new Set<AnalyticsEvent>([
   AnalyticsEvent.INVALID_COMMAND,
   AnalyticsEvent.KNOWLEDGE_FILE_UPDATED,
   AnalyticsEvent.LOGIN,
+  AnalyticsEvent.LOGIN_STARTED,
+  AnalyticsEvent.LOGIN_FAILED,
+  AnalyticsEvent.LOGIN_TIMEOUT,
+  AnalyticsEvent.LOGIN_ABORTED,
+  // Desktop surface events are low-volume; keep them whole so the app's launch /
+  // login / activity funnels aren't decimated by the 1% default sample.
+  AnalyticsEvent.DESKTOP_APP_LAUNCHED,
+  AnalyticsEvent.DESKTOP_LOGIN,
+  AnalyticsEvent.DESKTOP_LOGOUT,
+  AnalyticsEvent.DESKTOP_THREAD_CREATED,
+  AnalyticsEvent.DESKTOP_PROJECT_OPENED,
+  AnalyticsEvent.DESKTOP_TURN_COMPLETED,
+  AnalyticsEvent.DESKTOP_HARNESS_CHANGED,
+  AnalyticsEvent.DESKTOP_MODEL_CHANGED,
+  AnalyticsEvent.DESKTOP_SKILL_RUN,
   AnalyticsEvent.TERMINAL_COMMAND_COMPLETED,
   AnalyticsEvent.UPDATE_CODEBUFF_FAILED,
   AnalyticsEvent.USER_INPUT,

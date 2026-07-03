@@ -25,6 +25,7 @@ export type CliEnv = BaseEnv & {
   SSH_CLIENT?: string
   SSH_TTY?: string
   SSH_CONNECTION?: string
+  CODESPACES?: string
 
   // Display server detection (Linux headless check)
   DISPLAY?: string
@@ -73,6 +74,9 @@ export type CliEnv = BaseEnv & {
   CODEBUFF_RG_PATH?: string
   CODEBUFF_SCROLL_MULTIPLIER?: string
   CODEBUFF_PERF_TEST?: string
+  CODEBUFF_TRACE?: string
+  // Toggle for mirroring CLI logs to the server's /api/logs sink (Axiom).
+  CODEBUFF_SHIP_LOGS?: string
   FREEBUFF_MODE?: string
 }
 

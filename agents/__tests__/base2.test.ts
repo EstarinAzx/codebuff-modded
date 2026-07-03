@@ -5,6 +5,7 @@ import {
   FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID,
   FREEBUFF_KIMI_MODEL_ID,
   FREEBUFF_MINIMAX_MODEL_ID,
+  FREEBUFF_MINIMAX_M3_MODEL_ID,
   FREEBUFF_MIMO_V25_MODEL_ID,
   FREEBUFF_MIMO_V25_PRO_MODEL_ID,
 } from '@codebuff/common/constants/freebuff-models'
@@ -13,15 +14,15 @@ import { createBase2 } from '../base2/base2'
 import codeReviewerLite from '../reviewer/code-reviewer-lite'
 
 describe('base2 reviewer selection', () => {
-  test('Codebuff lite uses DeepSeek V4 Flash and its matching reviewer', () => {
+  test('Codebuff lite uses MiniMax M3 and its matching reviewer', () => {
     const base2 = createBase2('lite')
 
-    expect(base2.model).toBe(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID)
-    expect(base2.spawnableAgents).toContain('code-reviewer-deepseek-flash')
+    expect(base2.model).toBe(FREEBUFF_MINIMAX_M3_MODEL_ID)
+    expect(base2.spawnableAgents).toContain('code-reviewer-minimax-m3')
     expect(base2.instructionsPrompt).toContain(
-      'Spawn a code-reviewer-deepseek-flash',
+      'Spawn a code-reviewer-minimax-m3',
     )
-    expect(base2.stepPrompt).toContain('spawn a code-reviewer-deepseek-flash')
+    expect(base2.stepPrompt).toContain('spawn a code-reviewer-minimax-m3')
   })
 
   test('legacy lite reviewer definition uses DeepSeek V4 Flash', () => {
@@ -30,6 +31,7 @@ describe('base2 reviewer selection', () => {
 
   test.each([
     [FREEBUFF_MINIMAX_MODEL_ID, 'code-reviewer-minimax'],
+    [FREEBUFF_MINIMAX_M3_MODEL_ID, 'code-reviewer-minimax-m3'],
     [FREEBUFF_KIMI_MODEL_ID, 'code-reviewer-kimi'],
     [FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID, 'code-reviewer-deepseek'],
     [FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID, 'code-reviewer-deepseek-flash'],

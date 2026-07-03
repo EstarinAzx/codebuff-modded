@@ -4,7 +4,10 @@ import {
   LIMITED_FREEBUFF_MODEL_ID,
   resolveFreebuffModelForAccessTier,
 } from '@codebuff/common/constants/freebuff-models'
-import { getRateLimitsByModel } from '@codebuff/common/types/freebuff-session'
+import {
+  getRateLimitsByModel,
+  getReferralInfo,
+} from '@codebuff/common/types/freebuff-session'
 import { useEffect } from 'react'
 
 import {
@@ -19,6 +22,10 @@ import {
   recordFreebuffInstanceOwner,
 } from '../utils/freebuff-instance-owner'
 import { logger } from '../utils/logger'
+import {
+  getCachedReferral,
+  rememberReferral,
+} from '../utils/freebuff-referral-cache'
 import { saveFreebuffModelPreference } from '../utils/settings'
 
 import type { FreebuffSessionResponse } from '../types/freebuff-session'
@@ -28,7 +35,6 @@ import type {
   FreebuffSessionServerResponse,
 } from '@codebuff/common/types/freebuff-session'
 
-const POLL_INTERVAL_QUEUED_MS = 5_000
 const POLL_INTERVAL_ACTIVE_MS = 30_000
 const POLL_INTERVAL_ERROR_MS = 10_000
 
@@ -36,7 +42,7 @@ const POLL_INTERVAL_ERROR_MS = 10_000
  *  account has rotated the id and respond with `{ status: 'superseded' }`. */
 const FREEBUFF_INSTANCE_HEADER = 'x-freebuff-instance-id'
 
-/** Header sent on POST telling the server which model's queue to join. */
+/** Header sent on POST telling the server which model to use. */
 const FREEBUFF_MODEL_HEADER = 'x-freebuff-model'
 
 /** Play the terminal bell so users get an audible notification on admission. */
@@ -73,10 +79,10 @@ async function callSession(
     signal: opts.signal,
   })
   // 404 = endpoint not deployed on this server (older web build). Treat as
-  // "waiting room disabled" so a newer CLI against an older server still
-  // works, rather than stranding users in a waiting room forever.
+  // "no session" so a newer CLI against an older server drops to the model
+  // picker rather than stranding the user, rather than erroring out.
   if (resp.status === 404) {
-    return { status: 'disabled' }
+    return { status: 'none' }
   }
   // 403 with a country_blocked or banned body is a terminal signal, not an
   // error — the server rejects non-allowlist countries and banned accounts up
@@ -137,8 +143,6 @@ async function callSession(
  *  is terminal (no further polling). */
 function nextDelayMs(next: FreebuffSessionResponse): number | null {
   switch (next.status) {
-    case 'queued':
-      return POLL_INTERVAL_QUEUED_MS
     case 'active':
       // Poll at the normal cadence, but ensure we land just after
       // `expires_at` so the transition shows up promptly instead of leaving
@@ -152,7 +156,6 @@ function nextDelayMs(next: FreebuffSessionResponse): number | null {
       // (server returns `none`, we synthesize ended-no-instanceId) is prompt.
       return next.instanceId ? POLL_INTERVAL_ACTIVE_MS : null
     case 'none':
-    case 'disabled':
     case 'superseded':
     case 'takeover_prompt':
     case 'country_blocked':
@@ -160,6 +163,7 @@ function nextDelayMs(next: FreebuffSessionResponse): number | null {
     case 'model_locked':
     case 'rate_limited':
     case 'model_unavailable':
+    case 'premium_slot_taken':
       return null
   }
 }
@@ -194,7 +198,6 @@ export function getFreebuffInstanceId(): string | undefined {
   const current = useFreebuffSessionStore.getState().session
   if (!current) return undefined
   switch (current.status) {
-    case 'queued':
     case 'active':
     case 'ended':
       return current.instanceId
@@ -204,13 +207,12 @@ export function getFreebuffInstanceId(): string | undefined {
 }
 
 /** True when the session row represents a server-side slot the caller is
- *  holding (queued, active, or in the post-expiry grace window with a live
+ *  holding (active, or in the post-expiry grace window with a live
  *  instance id). DELETE only matters in those states; otherwise we'd fire a
  *  spurious request the server has nothing to act on. */
 function shouldReleaseSlot(current: FreebuffSessionResponse | null): boolean {
   if (!current) return false
   return (
-    current.status === 'queued' ||
     current.status === 'active' ||
     (current.status === 'ended' && Boolean(current.instanceId))
   )
@@ -221,11 +223,8 @@ function toLandingSession(
 ): Extract<FreebuffSessionResponse, { status: 'none' }> {
   const accessTier =
     current && 'accessTier' in current ? current.accessTier : undefined
-  const queueDepthByModel =
-    current && 'queueDepthByModel' in current
-      ? current.queueDepthByModel
-      : undefined
   const rateLimitsByModel = getRateLimitsByModel(current)
+  const referral = getReferralInfo(current) ?? getCachedReferral()
   const countryCode =
     current && 'countryCode' in current ? current.countryCode : undefined
   const countryBlockReason =
@@ -240,8 +239,8 @@ function toLandingSession(
   return {
     status: 'none',
     ...(accessTier ? { accessTier } : {}),
-    ...(queueDepthByModel ? { queueDepthByModel } : {}),
     ...(rateLimitsByModel ? { rateLimitsByModel } : {}),
+    ...(referral ? { referral } : {}),
     ...(countryCode ? { countryCode } : {}),
     ...(countryBlockReason ? { countryBlockReason } : {}),
     ...(ipPrivacySignals ? { ipPrivacySignals } : {}),
@@ -417,17 +416,17 @@ interface UseFreebuffSessionResult {
 }
 
 /**
- * Manages the freebuff waiting-room session lifecycle:
+ * Manages the freebuff session lifecycle:
  *   - GET on mount to probe state (no auto-join; the user picks a model in
  *     the landing screen, which calls joinFreebuffQueue)
  *   - if the probe sees an existing seat, auto-takes-over when the prior
  *     local owner process is gone; otherwise asks before POSTing to rotate
  *     the instance id so any other CLI on the same account is superseded
- *   - polls GET while queued (fast) or active (slow) to keep state fresh
+ *   - polls GET while active to keep state fresh
  *   - re-POSTs on explicit refresh (chat gate rejected us, user switched
  *     models, user rejoined after ending)
  *   - DELETE on unmount so the slot frees up for the next user
- *   - plays a bell on transition from queued → active
+ *   - plays a bell on admission to an active session
  */
 export function useFreebuffSession(): UseFreebuffSessionResult {
   const session = useFreebuffSessionStore((s) => s.session)
@@ -437,7 +436,9 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
     const { setSession, setError } = useFreebuffSessionStore.getState()
 
     if (!IS_FREEBUFF) {
-      setSession({ status: 'disabled' })
+      // Non-freebuff (Codebuff) builds never gate on a free session; leave the
+      // store empty (app.tsx's session routing is all behind IS_FREEBUFF).
+      setSession(null)
       return
     }
 
@@ -445,7 +446,7 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
     if (!token) {
       logger.warn(
         {},
-        '[freebuff-session] No auth token; skipping waiting-room admission',
+        '[freebuff-session] No auth token; skipping free-session admission',
       )
       setError('Not authenticated')
       return
@@ -463,7 +464,8 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
     let nextMethod: 'GET' | 'POST' = 'GET'
 
     const apply = (next: FreebuffSessionResponse) => {
-      if (next.status === 'queued' || next.status === 'active') {
+      rememberReferral(next)
+      if (next.status === 'active') {
         useFreebuffModelStore.getState().setSelectedModel(next.model)
         recordFreebuffInstanceOwner(next.instanceId)
       } else if (next.status === 'none' && next.accessTier === 'limited') {
@@ -543,7 +545,7 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
         if (
           method === 'GET' &&
           previousStatus === null &&
-          (next.status === 'queued' || next.status === 'active')
+          next.status === 'active'
         ) {
           useFreebuffModelStore.getState().setSelectedModel(next.model)
           // A fast restart after Ctrl+C can observe the old server row before
@@ -558,7 +560,10 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
           return
         }
 
-        if (previousStatus === 'queued' && next.status === 'active') {
+        // Bell on admission: the user committed to a model on the landing
+        // screen (status 'none'), which POSTs and lands them straight on an
+        // active session now that there's no waiting room.
+        if (previousStatus === 'none' && next.status === 'active') {
           playAdmissionSound()
         }
 
@@ -607,7 +612,7 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
         // Abort any in-flight fetch so it can't race us and overwrite state.
         abortController.abort()
         abortController = new AbortController()
-        // Reset previousStatus so the queued→active bell still fires after
+        // Reset previousStatus so the admission bell still fires after
         // a forced restart, and so the active|ended → none synthesis below
         // doesn't bounce a 'landing' restart straight back to 'ended'.
         previousStatus = null
@@ -617,11 +622,10 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
           // tick/apply path because a server-side row that hasn't been
           // swept yet would trip the startup-takeover branch into an
           // auto-POST — the exact silent-rejoin this mode exists to
-          // prevent. But the picker still needs live queue depths and quota
-          // snapshots, so kick off a fire-and-forget GET and extract only
-          // picker metadata from the response, ignoring whatever status it
-          // claims. Polling resumes when the user commits to a model via
-          // joinFreebuffQueue.
+          // prevent. But the picker still needs live quota snapshots, so kick
+          // off a fire-and-forget GET and extract only picker metadata from
+          // the response, ignoring whatever status it claims. Polling resumes
+          // when the user commits to a model via joinFreebuffQueue.
           const landingSession = toLandingSession(
             useFreebuffSessionStore.getState().session,
           )
@@ -636,16 +640,16 @@ export function useFreebuffSession(): UseFreebuffSessionResult {
               ) {
                 return
               }
-              if (response.status === 'none' || response.status === 'queued') {
+              if (response.status === 'none') {
                 apply({
                   status: 'none',
                   accessTier: response.accessTier ?? landingSession.accessTier,
-                  queueDepthByModel:
-                    response.queueDepthByModel ??
-                    landingSession.queueDepthByModel,
                   rateLimitsByModel:
                     response.rateLimitsByModel ??
                     landingSession.rateLimitsByModel,
+                  // Carry the referral block so the "change model" picker shows
+                  // the GLM banner too (the server only attaches it to `none`).
+                  referral: getReferralInfo(response) ?? landingSession.referral,
                   countryCode:
                     response.countryCode ?? landingSession.countryCode,
                   countryBlockReason:

@@ -6,7 +6,7 @@ export type {
   TextPart,
   ImagePart,
 } from '@codebuff/common/types/messages/content-part'
-export { run } from './run'
+export { run, STATE_SNAPSHOT_INTERRUPTION_MESSAGE } from './run'
 export { getFiles } from './tools/read-files'
 export type { FileFilter, FileFilterResult } from './tools/read-files'
 export type {
@@ -16,6 +16,7 @@ export type {
   TextContent,
   ImageContent,
 } from './run'
+export type { TraceWriter } from '@codebuff/common/types/contracts/trace'
 export { buildUserMessageContent } from '@codebuff/agent-runtime/util/messages'
 // Agent type exports
 export type { AgentDefinition } from '@codebuff/common/templates/initial-agents-dir/types/agent-definition'

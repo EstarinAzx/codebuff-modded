@@ -1,8 +1,13 @@
 import * as fs from 'fs'
 import path from 'path'
 
+import {
+  CHAT_MESSAGES_FILENAME,
+  getFirstUserPrompt,
+  readChatMeta,
+} from './chat-meta'
+import { CHAT_LOG_FILENAME, logger } from './logger'
 import { getProjectDataDir } from '../project-files'
-import { logger } from './logger'
 
 import type { ChatMessage } from '../types/chat'
 
@@ -11,27 +16,14 @@ export interface ChatHistoryEntry {
   lastPrompt: string
   timestamp: Date
   messageCount: number
+  /** True when chat-messages.json exists but can't be parsed (e.g. truncated
+   * by a crash mid-write). Shown in /history so the chat doesn't silently
+   * vanish; can be deleted but not resumed. */
+  unreadable?: boolean
 }
 
 function getChatsDir(): string {
   return path.join(getProjectDataDir(), 'chats')
-}
-
-/**
- * Get the first user message from a list of chat messages
- */
-function getFirstUserPrompt(messages: ChatMessage[]): string {
-  for (const msg of messages) {
-    if (msg?.variant === 'user' && msg.content) {
-      // Truncate long prompts
-      const content = msg.content.trim()
-      if (content.length > 100) {
-        return content.slice(0, 97) + '...'
-      }
-      return content
-    }
-  }
-  return '(empty chat)'
 }
 
 interface ChatDirInfo {
@@ -66,7 +58,7 @@ export function getAllChats(maxChats: number = 500): ChatHistoryEntry[] {
         chatDirInfos.push({
           chatId,
           chatPath,
-          messagesPath: path.join(chatPath, 'chat-messages.json'),
+          messagesPath: path.join(chatPath, CHAT_MESSAGES_FILENAME),
           mtime: stat.mtime,
         })
       } catch {
@@ -87,10 +79,24 @@ export function getAllChats(maxChats: number = 500): ChatHistoryEntry[] {
         let lastPrompt = '(empty chat)'
 
         if (fs.existsSync(info.messagesPath)) {
-          const content = fs.readFileSync(info.messagesPath, 'utf8')
-          const messages = JSON.parse(content) as ChatMessage[]
-          messageCount = messages.length
-          lastPrompt = getFirstUserPrompt(messages)
+          // Prefer the sidecar summary: transcripts are unbounded, so parsing
+          // every full chat-messages.json here can make /history slow.
+          const meta = readChatMeta(info.chatPath)
+          if (meta) {
+            messageCount = meta.messageCount
+            lastPrompt = meta.firstPrompt
+          } else {
+            // Pre-sidecar chats, or a sidecar that no longer matches the
+            // messages file (rewritten by an older CLI, crash between the
+            // two writes): parse the full file.
+            const content = fs.readFileSync(info.messagesPath, 'utf8')
+            const messages = JSON.parse(content) as ChatMessage[]
+            if (!Array.isArray(messages)) {
+              throw new Error('chat-messages.json is not an array')
+            }
+            messageCount = messages.length
+            lastPrompt = getFirstUserPrompt(messages)
+          }
         }
 
         // Skip empty chats (no messages)
@@ -110,6 +116,15 @@ export function getAllChats(maxChats: number = 500): ChatHistoryEntry[] {
           },
           'Failed to read chat messages',
         )
+        // Don't silently hide the chat: list it as unreadable so the user
+        // knows it exists (and can delete it) instead of thinking it was lost
+        chats.push({
+          chatId: info.chatId,
+          lastPrompt: '(unreadable chat)',
+          timestamp: info.mtime,
+          messageCount: 0,
+          unreadable: true,
+        })
       }
     }
 
@@ -120,6 +135,48 @@ export function getAllChats(maxChats: number = 500): ChatHistoryEntry[] {
       'Failed to list chats',
     )
     return []
+  }
+}
+
+// Older CLI versions logged the full conversation (including attachments) to
+// log.jsonl on every step, leaving multi-GB files in chat directories. Delete
+// any log file over this cap; with summary-only logging, healthy logs stay
+// far below it.
+const MAX_LOG_FILE_BYTES = 10 * 1024 * 1024
+// Only delete logs from chats untouched for this long, so debug logs for
+// recent chats stay available.
+const MIN_LOG_AGE_MS = 14 * 24 * 60 * 60 * 1000
+
+/**
+ * Delete oversized log.jsonl files from chat directories that haven't been
+ * touched in 14+ days. Only debug logs are removed — chat history files are
+ * untouched.
+ */
+export function trimOversizedChatLogs(): void {
+  let chatsDir: string
+  let chatIds: string[]
+  try {
+    chatsDir = getChatsDir()
+    chatIds = fs.readdirSync(chatsDir)
+  } catch {
+    return // No project root set or no chats directory yet
+  }
+
+  const deleteBefore = Date.now() - MIN_LOG_AGE_MS
+  for (const chatId of chatIds) {
+    const logFile = path.join(chatsDir, chatId, CHAT_LOG_FILENAME)
+    try {
+      const stats = fs.statSync(logFile, { throwIfNoEntry: false })
+      if (
+        stats &&
+        stats.size > MAX_LOG_FILE_BYTES &&
+        stats.mtimeMs < deleteBefore
+      ) {
+        fs.unlinkSync(logFile)
+      }
+    } catch {
+      // Ignore errors for individual files
+    }
   }
 }
 

@@ -91,6 +91,13 @@ export const minimaxModels = {
 } as const
 export type MiniMaxModel = (typeof minimaxModels)[keyof typeof minimaxModels]
 
+export const moonshotModels = {
+  kimiK26: 'moonshotai/kimi-k2.6',
+  kimiK27Code: 'moonshotai/kimi-k2.7-code',
+} as const
+export type MoonshotModel =
+  (typeof moonshotModels)[keyof typeof moonshotModels]
+
 // Vertex uses "endpoint IDs" for finetuned models, which are just integers
 export const finetunedVertexModels = {
   ft_filepicker_003: '196166068534771712',
@@ -175,6 +182,21 @@ export function supportsCacheControl(model: Model): boolean {
     return false
   }
   return !nonCacheableModels.includes(model)
+}
+
+/**
+ * Claude 4.6+ (including Fable) rejects requests whose final message is an
+ * assistant message ("This model does not support assistant message prefill"),
+ * e.g. when routed through Amazon Bedrock. Older Claude models and other
+ * providers accept a trailing assistant message as a prefill to continue from.
+ */
+export function supportsAssistantPrefill(model: Model): boolean {
+  const match = model.match(/claude-(?:[a-z]+-)?(\d+(?:[.-]\d+)?)/)
+  if (!match) {
+    return true
+  }
+  const version = parseFloat(match[1].replace('-', '.'))
+  return version < 4.6
 }
 
 export function getModelFromShortName(

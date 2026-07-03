@@ -3,6 +3,7 @@ import { useKeyboard } from '@opentui/react'
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,8 +12,11 @@ import React, {
 import { Button } from './button'
 import {
   FALLBACK_FREEBUFF_MODEL_ID,
+  FREEBUFF_PREMIUM_SESSION_LIMIT,
   getFreebuffDeploymentAvailabilityLabel,
   getFreebuffModelsForAccessTier,
+  getRecommendedFreebuffModelId,
+  isFreebuffGlmV52ModelId,
   isFreebuffModelAvailable,
   isFreebuffPremiumModelId,
 } from '@codebuff/common/constants/freebuff-models'
@@ -20,6 +24,7 @@ import { getRateLimitsByModel } from '@codebuff/common/types/freebuff-session'
 
 import { joinFreebuffQueue } from '../hooks/use-freebuff-session'
 import { useNow } from '../hooks/use-now'
+import { useFreebuffLandingFocusStore } from '../state/freebuff-landing-focus-store'
 import { useFreebuffModelStore } from '../state/freebuff-model-store'
 import { useFreebuffSessionStore } from '../state/freebuff-session-store'
 import { useTerminalDimensions } from '../hooks/use-terminal-dimensions'
@@ -28,18 +33,31 @@ import {
   freebuffModelNavigationDirectionForKey,
   nextFreebuffModelId,
 } from '../utils/freebuff-model-navigation'
+import { formatSessionUnits } from '../utils/format-session-units'
+import {
+  formatFreebuffPremiumResetCountdown,
+  getFreebuffPremiumResetAt,
+} from '../utils/freebuff-premium-reset'
 import { isPlainEnterKey } from '../utils/terminal-enter-detection'
 
 import type { FreebuffModelOption } from '@codebuff/common/constants/freebuff-models'
 import type { KeyEvent, ScrollBoxRenderable } from '@opentui/core'
 
-// Section grouping: model rows keep their product/availability tiers, but all
-// selectable Freebuff models share the same daily session quota.
-// Putting the tier on a section header lets each row drop its redundant
-// "Premium"/"Unlimited" chip. The shared 0/5 counter lives in the page title
-// (rendered by the parent), not the section header — this picker is purely a
-// list of choices grouped by tier. Empty sections are filtered so a model set
-// with no premium (or no unlimited) entries doesn't render an orphan header.
+// The picker opens collapsed to a single recommended hero so a new user can
+// start with one Enter press without reading six boxes. The "see all models"
+// toggle reveals the rest, grouped into the same product/availability tiers.
+//
+// Section grouping (expanded view): model rows keep their tiers, but the
+// premium models share one daily session quota while the unlimited ones have
+// none. Putting the tier on a section header lets each row drop its redundant
+// "Premium"/"Unlimited" chip. The PREMIUM header carries the shared quota
+// inline — "N of M used · resets in …" — once any session is spent (turning
+// amber when exhausted, the moment its rows grey out). When collapsed there's
+// no PREMIUM header, but the recommended hero is unlimited, so the premium
+// count is irrelevant and simply doesn't show; only the limited tier (no
+// premium section) keeps a parent-rendered below-picker counter. UNLIMITED
+// needs no annotation. Empty sections are filtered so a model set with no
+// premium (or no unlimited) entries doesn't render an orphan header.
 //
 // `label` may be empty: limited-tier users only see the constrained model set,
 // so the "LIMITED" header would just leak the internal tier name without
@@ -50,22 +68,33 @@ type Section = {
   models: readonly FreebuffModelOption[]
 }
 
+// Sentinel id for the expand/collapse toggle so it can ride the same
+// keyboard-navigation list as the model rows (Tab/arrow to it, Enter to fire).
+const TOGGLE_ID = '__freebuff_toggle__'
+
+// Right-aligned CTA shown on the focused, joinable row so the highlighted card
+// reads as a button ("you can press Enter here") instead of just a selection.
+// Its width is reserved in the one-line width budget below so the cue never
+// overflows or wraps the row (a wrap would desync the focused-row scroll math).
+const FOCUS_CUE = 'Press Enter ↵'
+const CUE_GAP = 2 // min gap between a row's details and the focused-row cue
+
 /**
- * Dual-purpose model picker:
- *   - Pre-chat landing (session 'none'): user hasn't joined any queue. Picking
- *     a model is their explicit commitment to enter — this triggers the POST.
- *   - In-queue switcher (session 'queued'): picking a *different* model moves
- *     the user to the back of that queue (lose place in original). Picking the
- *     model they're already in is a no-op.
+ * Pre-chat model picker (session 'none'): user hasn't started a session yet.
+ * Picking a model is their explicit commitment to enter — this triggers the
+ * POST, which admits them straight to an active session. Opens collapsed to
+ * the recommended hero; Enter starts immediately.
  *
  * Keyboard navigation: Tab / arrow keys move the green highlight; Enter (or
- * Space) commits the focused row. Mouse click commits in one step.
+ * Space) commits the focused row — or, on the toggle, expands/collapses the
+ * list. Mouse click commits in one step.
  *
- * Layout: rows are grouped into PREMIUM / UNLIMITED sections so the tier is
- * visible without a per-row chip; the shared 0/5 counter sits inside the
- * PREMIUM section header. Names align in a column so taglines line up across
- * rows. On narrow terminals the secondary details (warning / deployment
- * hours) drop onto an indented second line under the row.
+ * Layout: the recommended model renders as a titled "RECOMMENDED" card with a
+ * bright border. When expanded, the remaining rows are grouped into PREMIUM /
+ * UNLIMITED sections so the tier is visible without a per-row chip; the shared
+ * premium-session quota rides the PREMIUM header. Names align in a column
+ * so taglines line up across rows. On narrow terminals the secondary details
+ * (warning / deployment hours) drop onto an indented second line under the row.
  *
  * On short terminals the parent passes `maxHeight`: the row list then lives
  * in a scrollbox capped at that many rows, a scrollbar appears when the
@@ -77,10 +106,15 @@ interface FreebuffModelSelectorProps {
    *  this, the list scrolls (scrollbar shown, focused row kept in view);
    *  otherwise the scrollbox shrinks to fit and no scrollbar appears. */
   maxHeight: number
+  /** Notifies the parent whenever the picker expands/collapses. The waiting-room
+   *  screen uses it to promote the wordmark to the full ASCII logo while the
+   *  picker is collapsed (the freed rows make room). */
+  onExpandedChange?: (expanded: boolean) => void
 }
 
 export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
   maxHeight,
+  onExpandedChange,
 }) => {
   const theme = useTheme()
   // contentMaxWidth (not terminalWidth) is the real budget — the parent
@@ -100,26 +134,74 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
   )
   const [pending, setPending] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
-  // Keyboard cursor — separate from the actually-selected model so that
-  // Tab/arrow navigation can preview without committing. Re-syncs to the
-  // selected model whenever the selection changes (after a successful switch
-  // or an external selectedModel update).
-  const [focusedId, setFocusedId] = useState<string>(selectedModel)
+
   const availableModels = useMemo(
-    () => getFreebuffModelsForAccessTier(accessTier),
+    // GLM 5.2 is a referral reward, not a freely-pickable model, so it's
+    // surfaced by the separate FreebuffReferralBanner rather than this grid.
+    () =>
+      getFreebuffModelsForAccessTier(accessTier).filter(
+        (m) => !isFreebuffGlmV52ModelId(m.id),
+      ),
     [accessTier],
   )
-  // Single-model limited states don't need comparative taglines. When limited
-  // has multiple choices, keep the row shape aligned with the full picker.
-  const showTagline = accessTier !== 'limited' || availableModels.length > 1
+  const recommendedModel = useMemo(() => {
+    const id = getRecommendedFreebuffModelId(accessTier)
+    return availableModels.find((m) => m.id === id) ?? availableModels[0]!
+  }, [accessTier, availableModels])
+  const otherModels = useMemo(
+    () => availableModels.filter((m) => m.id !== recommendedModel.id),
+    [availableModels, recommendedModel],
+  )
+  // Only worth collapsing when the toggle actually hides something. With a
+  // single "other" model (limited tier) we just show both — a "see 1 more
+  // model" toggle is noise.
+  const canCollapse = otherModels.length >= 2
+
+  // Default collapsed only on the landing screen and only when the saved/active
+  // selection IS the recommended model — a returning user whose preference is a
+  // different model gets the expanded list so their pick is visible and focused.
+  const isLanding = session?.status === 'none' || !session
+  const [expanded, setExpanded] = useState(
+    () => !canCollapse || !isLanding || selectedModel !== recommendedModel.id,
+  )
+  // Mirror the expanded state up to the waiting-room screen (collapsed → it
+  // promotes the wordmark to the full ASCII logo). useLayoutEffect so the
+  // parent's logo decision settles before paint, both on mount and on toggle.
+  useLayoutEffect(() => {
+    onExpandedChange?.(expanded)
+  }, [expanded, onExpandedChange])
+
+  // Keyboard cursor — separate from the actually-selected model so that
+  // Tab/arrow navigation can preview without committing. Starts on the user's
+  // saved/active pick (the recommended hero for a new user, since that's the
+  // default selection; their own model when expanded for a returning user).
+  const [focusedId, setFocusedId] = useState<string>(() => selectedModel)
+
+  // Focus targets contributed by the sibling referral banner (its copy / GLM
+  // buttons). The picker owns the only landing-screen keyboard handler, so it
+  // appends these after its own rows: arrowing down past the "see all models"
+  // toggle walks into them, and wrapping carries back up. `setLandingFocusedId`
+  // mirrors our cursor out so the banner can render its focused button.
+  const extraTargets = useFreebuffLandingFocusStore((s) => s.extraTargets)
+  const setLandingFocusedId = useFreebuffLandingFocusStore(
+    (s) => s.setFocusedId,
+  )
+  const extraTargetIds = useMemo(
+    () => extraTargets.map((t) => t.id),
+    [extraTargets],
+  )
+  useEffect(() => {
+    setLandingFocusedId(focusedId)
+  }, [focusedId, setLandingFocusedId])
+  // Clear the mirrored cursor when the picker unmounts so a stale id doesn't
+  // leave the banner's button looking focused on a screen without the picker.
+  useEffect(() => () => setLandingFocusedId(null), [setLandingFocusedId])
+
   const sections = useMemo(() => {
+    if (!expanded) return [] as readonly Section[]
     if (accessTier === 'limited') {
       return [
-        {
-          key: 'limited',
-          label: '',
-          models: availableModels,
-        },
+        { key: 'limited', label: '', models: otherModels },
       ] satisfies readonly Section[]
     }
     return (
@@ -127,30 +209,50 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         {
           key: 'premium',
           label: 'PREMIUM',
-          models: availableModels.filter((m) => isFreebuffPremiumModelId(m.id)),
+          models: otherModels.filter((m) => isFreebuffPremiumModelId(m.id)),
         },
         {
           key: 'unlimited',
           label: 'UNLIMITED',
-          models: availableModels.filter(
-            (m) => !isFreebuffPremiumModelId(m.id),
-          ),
+          models: otherModels.filter((m) => !isFreebuffPremiumModelId(m.id)),
         },
       ] satisfies readonly Section[]
     ).filter((section) => section.models.length > 0)
-  }, [accessTier, availableModels])
+  }, [expanded, accessTier, otherModels])
+
+  // Model rows in render order: the recommended hero first, then (when
+  // expanded) the grouped rest.
   const renderedModelIds = useMemo(
-    () =>
-      sections.flatMap((section) => section.models.map((model) => model.id)),
-    [sections],
+    () => [
+      recommendedModel.id,
+      ...sections.flatMap((section) => section.models.map((m) => m.id)),
+    ],
+    [recommendedModel, sections],
   )
+  // Keyboard-navigable ids: the model rows, then the toggle, then any focus
+  // targets the referral banner registered (so arrowing down past "see all
+  // models" reaches its buttons; nextFreebuffModelId wraps back to the top).
+  const navIds = useMemo(
+    () => [
+      ...renderedModelIds,
+      ...(canCollapse ? [TOGGLE_ID] : []),
+      ...extraTargetIds,
+    ],
+    [canCollapse, renderedModelIds, extraTargetIds],
+  )
+
+  // Keep focus valid as the list expands/collapses or the selection changes
+  // server-side. An explicit, still-valid focus (e.g. just set by the toggle)
+  // is preserved; only an out-of-range focus snaps back to the selection.
   useEffect(() => {
-    setFocusedId(
-      renderedModelIds.includes(selectedModel)
-        ? selectedModel
-        : renderedModelIds[0]!,
+    setFocusedId((curr) =>
+      navIds.includes(curr)
+        ? curr
+        : navIds.includes(selectedModel)
+          ? selectedModel
+          : navIds[0]!,
     )
-  }, [renderedModelIds, selectedModel])
+  }, [navIds, selectedModel])
 
   useEffect(() => {
     // Landing-screen safety net: if the in-memory selection becomes
@@ -167,8 +269,31 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
     }
   }, [renderedModelIds, now, selectedModel, session, setSelectedModel])
 
-  const committedModelId = session?.status === 'queued' ? session.model : null
+  // No queued state any more: there's never a model the user is "already in"
+  // the queue for, so re-picking is always meaningful.
+  const committedModelId: string | null = null
   const rateLimitsByModel = getRateLimitsByModel(session)
+
+  // Premium-session quota, surfaced on the PREMIUM header itself: "N of M used
+  // · resets in …". All premium models share one pool; the server replicates
+  // the same snapshot under every model id, so any entry has the right count.
+  // The count shows from the start — even at "0 of M" — so full-access users
+  // can see the daily pool and reset cadence before they spend anything; it
+  // turns amber when the pool is exhausted — the same moment the premium rows
+  // grey out — so the header explains why they're disabled. (The PREMIUM
+  // section only renders for the full-access tier, so this is scoped to it.)
+  const sharedRateLimit = rateLimitsByModel
+    ? Object.values(rateLimitsByModel)[0]
+    : undefined
+  const premiumUsed = sharedRateLimit?.recentCount ?? 0
+  const premiumExhausted = premiumUsed >= FREEBUFF_PREMIUM_SESSION_LIMIT
+  // The pool resets daily on a Pacific-day boundary regardless of usage, so the
+  // countdown is meaningful even at zero used — getFreebuffPremiumResetAt falls
+  // back to the next day boundary when the server hasn't sent a resetAt yet.
+  const premiumResetCountdown = formatFreebuffPremiumResetCountdown(
+    getFreebuffPremiumResetAt({ rateLimitsByModel, nowMs: now }),
+    now,
+  )
 
   const BUTTON_CHROME = 4 // 2 border + 2 padding
   const NAME_GAP = 2 // spaces between name column and details column
@@ -177,13 +302,20 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
   // across all rows) followed by a details column (tagline · warning ·
   // deployment-hours/closed). Falls back to single-column mode on narrow
   // terminals where the secondary details spill to an indented second line.
-  const { wrapDetails, buttonOuterWidth, nameColumnWidth } = useMemo(() => {
+  // Computed across ALL models (not just the expanded ones) so the recommended
+  // hero and the revealed rows share one width and nothing reflows on toggle.
+  const {
+    wrapDetails,
+    buttonOuterWidth,
+    nameColumnWidth,
+    recommendedOneLineLen,
+  } = useMemo(() => {
     const nameLen = (m: FreebuffModelOption) => m.displayName.length
     const maxNameLen = Math.max(...availableModels.map(nameLen))
 
     const detailsParts = (model: FreebuffModelOption): number[] => {
       const parts: number[] = []
-      if (showTagline) parts.push(model.tagline.length)
+      parts.push(model.tagline.length)
       if (model.warning) parts.push(model.warning.length)
       if (model.availability === 'deployment_hours') {
         parts.push(deploymentAvailabilityLabel.length)
@@ -200,22 +332,32 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
       NAME_GAP +
       joinedLen(detailsParts(model))
 
+    // The cue lives only on the recommended hero, so only its line needs to fit
+    // the "Press Enter ↵" gutter. Folding that into the max means longer rows
+    // (e.g. DeepSeek Pro's data-collection warning) keep their natural width —
+    // the buttons widen only if the recommended row + cue is the longest line.
+    // Returned so the render path can right-align the cue against the same
+    // length the gutter was reserved for — one formula, no reserve/consume drift.
+    const recommendedOneLineLen = oneLineLen(recommendedModel)
     const maxOneLineOuter =
-      Math.max(...availableModels.map(oneLineLen)) + BUTTON_CHROME
+      Math.max(
+        ...availableModels.map(oneLineLen),
+        recommendedOneLineLen + CUE_GAP + FOCUS_CUE.length,
+      ) + BUTTON_CHROME
     if (maxOneLineOuter <= contentMaxWidth) {
       return {
         wrapDetails: false,
         buttonOuterWidth: maxOneLineOuter,
         nameColumnWidth: maxNameLen,
+        recommendedOneLineLen,
       }
     }
 
     // Narrow: line 1 = "indicator name · tagline", line 2 (if any) =
     // "  warning · hours". Compute the max of both so all buttons stay the
-    // same width. When taglines are hidden (limited tier), line 1 is just
-    // "indicator name" with no separator.
+    // same width.
     const labelLineLen = (m: FreebuffModelOption) =>
-      2 + m.displayName.length + (showTagline ? 3 + m.tagline.length : 0)
+      2 + m.displayName.length + 3 + m.tagline.length
     const detailsLineLen = (m: FreebuffModelOption) => {
       const parts: number[] = []
       if (m.warning) parts.push(m.warning.length)
@@ -236,42 +378,65 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         contentMaxWidth,
       ),
       nameColumnWidth: maxNameLen,
+      recommendedOneLineLen,
     }
-  }, [availableModels, contentMaxWidth, deploymentAvailabilityLabel, showTagline])
+  }, [
+    availableModels,
+    contentMaxWidth,
+    deploymentAvailabilityLabel,
+    recommendedModel,
+  ])
 
-  // Flattened vertical layout: every model's top offset + height within the
-  // scroll content, plus the total. Mirrors the JSX below exactly so the
-  // auto-scroll math lands the focused row precisely. A button is 2 border
+  const rowWraps = useCallback(
+    (m: FreebuffModelOption) =>
+      wrapDetails && (!!m.warning || m.availability === 'deployment_hours'),
+    [wrapDetails],
+  )
+
+  // Flattened vertical layout: every navigable element's top offset + height
+  // within the scroll content, plus the total. Mirrors the JSX below exactly so
+  // the auto-scroll math lands the focused row precisely. A button is 2 border
   // rows + its text line(s); in wrapDetails mode a row with a warning or
   // deployment-hours label spills its details onto a second indented line.
-  // Headers add 1 row; sections after the first add 1 row of marginTop.
+  // Headers add 1 row; sections after the first add 1 row of marginTop; the
+  // toggle adds its marginTop + 1.
   const SECTION_GAP = 1
+  const TOGGLE_MARGIN = 1
   const { totalHeight, offsetById } = useMemo(() => {
     const offsets: Record<string, { top: number; height: number }> = {}
     let y = 0
-    sections.forEach((section, idx) => {
-      if (idx > 0) y += SECTION_GAP
+    // Recommended hero (a titled row, same height rules as any other row).
+    const heroHeight = 2 + (rowWraps(recommendedModel) ? 2 : 1)
+    offsets[recommendedModel.id] = { top: y, height: heroHeight }
+    y += heroHeight
+    sections.forEach((section) => {
+      y += SECTION_GAP // every section sits below the hero (or prior one) with a gap
       if (section.label) y += 1
       section.models.forEach((m) => {
-        const wraps =
-          wrapDetails && (!!m.warning || m.availability === 'deployment_hours')
-        const h = 2 /* borders */ + (wraps ? 2 : 1)
+        const h = 2 + (rowWraps(m) ? 2 : 1)
         offsets[m.id] = { top: y, height: h }
         y += h
       })
     })
+    if (canCollapse) {
+      y += TOGGLE_MARGIN
+      offsets[TOGGLE_ID] = { top: y, height: 1 }
+      y += 1
+    }
     return { totalHeight: y, offsetById: offsets }
-  }, [sections, wrapDetails])
+  }, [sections, rowWraps, recommendedModel, canCollapse])
 
   const needsScroll = totalHeight > maxHeight
   const scrollViewportHeight = Math.max(1, Math.min(totalHeight, maxHeight))
   const scrollRef = useRef<ScrollBoxRenderable | null>(null)
 
-  // Keep the keyboard-focused row inside the viewport as the user Tabs/arrows
-  // through a list taller than the available rows.
+  // Keep the keyboard-focused element inside the viewport as the user
+  // Tabs/arrows through a list taller than the available rows.
   useEffect(() => {
     const sb = scrollRef.current
     if (!sb || !needsScroll) return
+    // Referral-banner focus targets live outside the scrollbox, so they have no
+    // offset entry — there's nothing to scroll into view when one is focused.
     const entry = offsetById[focusedId]
     if (!entry) return
     const viewportHeight = sb.viewport.height
@@ -303,9 +468,24 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
     [pending, committedModelId, isJoinable],
   )
 
+  const toggleExpanded = useCallback(() => {
+    setExpanded((prev) => {
+      const next = !prev
+      // After revealing the list, drop focus onto the first newly-shown row so
+      // the next arrow press walks into it; after collapsing, return to the
+      // hero so Enter starts.
+      setFocusedId(
+        next
+          ? (otherModels[0]?.id ?? recommendedModel.id)
+          : recommendedModel.id,
+      )
+      return next
+    })
+  }, [otherModels, recommendedModel])
+
   // Tab / Shift+Tab and arrow keys move the focus highlight only; Enter or
-  // Space commits the focused row. Two-step navigation lets the user preview
-  // the highlight before committing.
+  // Space commits the focused row (or fires the toggle). Two-step navigation
+  // lets the user preview the highlight before committing.
   useKeyboard(
     useCallback(
       (key: KeyEvent) => {
@@ -318,6 +498,21 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         // like a frozen menu (arrows move the highlight, Enter does nothing).
         const isCommit = isPlainEnterKey(key) || name === 'space'
         if (isCommit) {
+          if (focusedId === TOGGLE_ID) {
+            key.preventDefault?.()
+            key.stopPropagation?.()
+            toggleExpanded()
+            return
+          }
+          // A referral-banner button (copy invite link / use GLM) is focused —
+          // fire its registered action instead of joining a queue.
+          const extraTarget = extraTargets.find((t) => t.id === focusedId)
+          if (extraTarget) {
+            key.preventDefault?.()
+            key.stopPropagation?.()
+            extraTarget.activate()
+            return
+          }
           if (isJoinable(focusedId) && focusedId !== committedModelId) {
             key.preventDefault?.()
             key.stopPropagation?.()
@@ -327,7 +522,7 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         }
         if (!direction) return
         const targetId = nextFreebuffModelId({
-          modelIds: renderedModelIds,
+          modelIds: navIds,
           focusedId,
           direction,
         })
@@ -340,19 +535,25 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
       [
         pending,
         pick,
+        toggleExpanded,
         focusedId,
         committedModelId,
         isJoinable,
-        renderedModelIds,
+        navIds,
+        extraTargets,
       ],
     ),
   )
 
-  const renderModelButton = (model: FreebuffModelOption) => {
+  const renderModelButton = (
+    model: FreebuffModelOption,
+    options: { recommended?: boolean } = {},
+  ) => {
     // Single visual state: the focused row IS the highlight. The user's
     // saved/committed pick is not shown separately — it just sets where
     // focus lands when the picker opens. Pressing Enter on the focused
     // row commits it.
+    const { recommended = false } = options
     const isHovered = hoveredId === model.id
     const isFocused = focusedId === model.id
     const canJoin = isJoinable(model.id)
@@ -368,6 +569,11 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
     const mutedColor = theme.muted
     const warningColor = theme.secondary
 
+    // Focused row gets the bright primary border (and arrow). Every other row —
+    // including the recommended card when the cursor has moved elsewhere — stays
+    // quiet (gray border, brightening only on hover) so it never competes with
+    // the user's current selection. The recommended card still reads as special
+    // via its "RECOMMENDED" border title, which the border color carries.
     const borderColor = isFocused
       ? theme.primary
       : isHovered
@@ -389,9 +595,28 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
       nameColumnWidth - model.displayName.length + NAME_GAP,
     )
 
+    // Right-aligned "Press Enter ↵" cue on the focused recommended row only.
+    // Right-align against recommendedOneLineLen — the exact length the gutter was
+    // reserved against above — so reserve and consume can't drift. The reservation
+    // guarantees cuePad >= CUE_GAP in one-line mode; the guard keeps it safe in
+    // wrap mode (no gutter reserved there) and against any contentMaxWidth clamp.
+    const cuePad =
+      buttonOuterWidth -
+      BUTTON_CHROME -
+      recommendedOneLineLen -
+      FOCUS_CUE.length
+    const showCue =
+      recommended &&
+      isFocused &&
+      interactable &&
+      !wrapDetails &&
+      cuePad >= CUE_GAP
+
     return (
       <Button
         key={model.id}
+        title={recommended ? ' RECOMMENDED ' : undefined}
+        titleAlignment={recommended ? 'left' : undefined}
         onClick={() => {
           setFocusedId(model.id)
           if (canJoin) pick(model.id)
@@ -418,15 +643,18 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
             {model.displayName}
           </span>
           {wrapDetails ? (
-            showTagline && <span fg={mutedColor}> · {model.tagline}</span>
+            <span fg={mutedColor}> · {model.tagline}</span>
           ) : (
             <>
-              {showTagline && (
-                <span fg={mutedColor}>{namePadding + model.tagline}</span>
-              )}
+              <span fg={mutedColor}>{namePadding + model.tagline}</span>
               {hasWarning && <span fg={warningColor}> · {model.warning}</span>}
               {hasHours && (
                 <span fg={mutedColor}> · {deploymentAvailabilityLabel}</span>
+              )}
+              {showCue && (
+                <span fg={theme.primary} attributes={TextAttributes.BOLD}>
+                  {' '.repeat(cuePad) + FOCUS_CUE}
+                </span>
               )}
             </>
           )}
@@ -445,22 +673,62 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
     )
   }
 
-  const sectionsContent = sections.map((section, sectionIdx) => (
+  const sectionsContent = sections.map((section) => (
     <box
       key={section.key}
       style={{
         flexDirection: 'column',
         alignItems: 'flex-start',
         gap: 0,
-        marginTop: sectionIdx === 0 ? 0 : SECTION_GAP,
+        marginTop: SECTION_GAP,
       }}
     >
+      {/* wrapMode 'none' pins headers to one row — the offset math above
+          assumes exactly 1 row per header, so a wrap would desync the
+          focused-row auto-scroll. */}
       {section.label && (
-        <text style={{ fg: theme.muted }}>{section.label}</text>
+        <text style={{ fg: theme.muted, wrapMode: 'none' }}>
+          {section.label}
+          {section.key === 'premium' && (
+            <span fg={premiumExhausted ? theme.secondary : theme.muted}>
+              {' '}
+              · {formatSessionUnits(premiumUsed)} of{' '}
+              {FREEBUFF_PREMIUM_SESSION_LIMIT} used
+            </span>
+          )}
+          {section.key === 'premium' && premiumResetCountdown && (
+            <span fg={theme.muted}> · resets in {premiumResetCountdown}</span>
+          )}
+        </text>
       )}
-      {section.models.map(renderModelButton)}
+      {section.models.map((m) => renderModelButton(m))}
     </box>
   ))
+
+  // Expand/collapse affordance. Collapsed: "see all N models" invites the user
+  // to browse past the recommended pick. Expanded: a quiet way back to the
+  // single-card view.
+  const toggleFocused = focusedId === TOGGLE_ID
+  const toggleColor = toggleFocused ? theme.primary : theme.muted
+  const toggleLabel = expanded
+    ? '↑  Show fewer'
+    : `↓  See all ${availableModels.length} models`
+  const toggleContent = canCollapse ? (
+    <Button
+      onClick={toggleExpanded}
+      onMouseOver={() => setFocusedId(TOGGLE_ID)}
+      style={{ marginTop: TOGGLE_MARGIN }}
+    >
+      <text style={{ wrapMode: 'none' }}>
+        <span
+          fg={toggleColor}
+          attributes={toggleFocused ? TextAttributes.BOLD : TextAttributes.NONE}
+        >
+          {toggleLabel}
+        </span>
+      </text>
+    </Button>
+  ) : null
 
   // Scrollbox clamped to the rows the parent can spare. When everything fits
   // it shrinks to the content height and no scrollbar shows, so tall
@@ -499,7 +767,9 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         },
       }}
     >
+      {renderModelButton(recommendedModel, { recommended: true })}
       {sectionsContent}
+      {toggleContent}
     </scrollbox>
   )
 }

@@ -19,7 +19,11 @@ import {
 import { toolNames } from '@codebuff/common/tools/constants'
 import { clientToolCallSchema } from '@codebuff/common/tools/list'
 import { AgentOutputSchema } from '@codebuff/common/types/session-state'
-import { extractApiErrorDetails } from '@codebuff/common/util/error'
+import {
+  FETCH_IDLE_TIMEOUT_USER_MESSAGE,
+  extractApiErrorDetails,
+  isFetchIdleTimeoutError,
+} from '@codebuff/common/util/error'
 import { cloneDeep } from 'lodash'
 
 import { executeComposioToolViaServer } from './composio'
@@ -45,6 +49,7 @@ import type { AgentDefinition } from '@codebuff/common/templates/initial-agents-
 import type { ToolName } from '@codebuff/common/tools/constants'
 import type { PublishedClientToolName } from '@codebuff/common/tools/list'
 import type { Logger } from '@codebuff/common/types/contracts/logger'
+import type { TraceWriter } from '@codebuff/common/types/contracts/trace'
 import type { CodebuffFileSystem } from '@codebuff/common/types/filesystem'
 import type { ToolMessage } from '@codebuff/common/types/messages/codebuff-message'
 import type {
@@ -130,6 +135,10 @@ export type CodebuffClientOptions = {
   fsSource?: Source<CodebuffFileSystem>
   spawnSource?: Source<CodebuffSpawn>
   logger?: Logger
+  /** Optional debug trace of agent message histories. Called with the full
+   *  history at each agent step boundary; implementations should append each
+   *  message once (see TraceWriter). */
+  traceWriter?: TraceWriter
 }
 
 export type ImageContent = {
@@ -154,12 +163,32 @@ export type RunOptions = {
   previousRun?: RunState
   extraToolResults?: ToolMessage[]
   signal?: AbortSignal
+  /** Optional steering hook. Drained at each agent step boundary during the run;
+   * any returned texts are appended to the conversation as user prompts (and keep
+   * the turn going) before the next LLM call. Lets a host inject messages into a
+   * running agent without aborting — i.e. "steer" it, as opposed to queuing a new
+   * prompt for after the turn finishes. */
+  drainSteeringMessages?: () => string[]
   costMode?: string
   /** Extra key/values merged into each LLM request's `codebuff_metadata`.
    *  Used by hosts (e.g. the CLI) to forward client-scoped identifiers like
    *  `freebuff_instance_id` that server-side gates read from the request body. */
   extraCodebuffMetadata?: Record<string, string>
+  /** Optional checkpoint hook. Called once when the run starts and then
+   * periodically while it is in flight, with a RunState snapshot that
+   * preserves all progress so far (the user's prompt plus any completed
+   * agent steps, ending with an interruption note). Hosts can persist these
+   * snapshots so that a killed process (closed terminal, crash) does not
+   * lose the in-flight turn. The final resolved RunState supersedes any
+   * snapshot; no snapshots are emitted after the run settles. */
+  onStateSnapshot?: (runState: RunState) => void
 }
+
+/** How often onStateSnapshot fires while a run is in flight. */
+const STATE_SNAPSHOT_INTERVAL_MS = 5_000
+
+export const STATE_SNAPSHOT_INTERRUPTION_MESSAGE =
+  'The session ended before this response completed. Partial progress has been preserved.'
 
 const createAbortError = (signal?: AbortSignal) => {
   if (signal?.reason instanceof Error) {
@@ -218,6 +247,7 @@ async function runOnce({
   fsSource = () => require('fs').promises,
   spawnSource,
   logger,
+  traceWriter,
 
   agent,
   prompt,
@@ -226,8 +256,10 @@ async function runOnce({
   previousRun,
   extraToolResults,
   signal,
+  drainSteeringMessages,
   costMode,
   extraCodebuffMetadata,
+  onStateSnapshot,
 }: RunExecutionOptions): Promise<RunState> {
   const fsSourceValue = typeof fsSource === 'function' ? fsSource() : fsSource
   const fs = await fsSourceValue
@@ -285,12 +317,25 @@ async function runOnce({
     delete sessionState.fileContext.customToolDefinitions[toolName]
   }
 
-  let resolve: (value: RunReturnType) => any = () => {}
+  let resolvePromise: (value: RunReturnType) => any = () => {}
   let _reject: (error: any) => any = () => {}
   const promise = new Promise<RunReturnType>((res, rej) => {
-    resolve = res
+    resolvePromise = res
     _reject = rej
   })
+
+  // Snapshot support: stop emitting the moment the run settles so a late
+  // snapshot can never overwrite the final state persisted by the host.
+  let settled = false
+  let snapshotTimer: ReturnType<typeof setInterval> | null = null
+  const resolve = (value: RunReturnType) => {
+    settled = true
+    if (snapshotTimer !== null) {
+      clearInterval(snapshotTimer)
+      snapshotTimer = null
+    }
+    resolvePromise(value)
+  }
 
   async function onError(error: { message: string }) {
     if (handleEvent) {
@@ -358,7 +403,10 @@ async function runOnce({
         handleStreamChunk?.({
           type: 'reasoning_chunk',
           chunk: chunk.text,
-          agentId: chunk.runId,
+          // The agent's stable id (matches subagent_start/subagent_chunk), so
+          // subagent reasoning attributes to the right agent. (Previously this
+          // forwarded runId, which no consumer's agent map is keyed by.)
+          agentId: chunk.agentId,
           ancestorRunIds: chunk.ancestorRunIds,
         })
       } else {
@@ -391,6 +439,7 @@ async function runOnce({
 
   const agentRuntimeImpl = getAgentRuntimeImpl({
     logger,
+    traceWriter,
     apiKey,
     handleStepsLogChunk: () => {
       // Does nothing for now
@@ -416,6 +465,7 @@ async function runOnce({
         fs,
         env,
         apiKey,
+        signal,
       })
     },
     requestMcpToolData: async ({ mcpConfig, toolNames }) => {
@@ -529,6 +579,43 @@ async function runOnce({
     return getCancelledRunState('Run cancelled by user.')
   }
 
+  if (onStateSnapshot) {
+    // The runtime replaces mainAgentState.messageHistory with a new array at
+    // each step boundary, so reference identity is a cheap "has anything
+    // durable changed" check. Skipping unchanged ticks avoids deep-cloning a
+    // potentially multi-MB sessionState every interval while the run is just
+    // waiting on a slow LLM call.
+    let lastSnapshotHistory: unknown = null
+    const emitStateSnapshot = () => {
+      if (settled || signal?.aborted) {
+        return
+      }
+      const history = sessionState.mainAgentState.messageHistory
+      if (history === lastSnapshotHistory) {
+        return
+      }
+      lastSnapshotHistory = history
+      try {
+        onStateSnapshot(
+          getCancelledRunState(STATE_SNAPSHOT_INTERRUPTION_MESSAGE),
+        )
+      } catch (error) {
+        logger?.debug?.(
+          { error: error instanceof Error ? error.message : String(error) },
+          'onStateSnapshot handler threw',
+        )
+      }
+    }
+    // Emit immediately so the user's prompt is checkpointed as soon as the
+    // run starts, then keep checkpointing progress while it is in flight.
+    emitStateSnapshot()
+    snapshotTimer = setInterval(emitStateSnapshot, STATE_SNAPSHOT_INTERVAL_MS)
+    // Don't let the checkpoint timer keep the host process alive.
+    if (typeof (snapshotTimer as any).unref === 'function') {
+      ;(snapshotTimer as any).unref()
+    }
+  }
+
   callMainPrompt({
     ...agentRuntimeImpl,
     promptId,
@@ -544,6 +631,7 @@ async function runOnce({
       toolResults: extraToolResults ?? [],
       agentId,
     },
+    drainSteeringMessages,
     repoUrl: undefined,
     repoId: undefined,
     clientSessionId: promptId,
@@ -554,8 +642,11 @@ async function runOnce({
     },
     signal: signal ?? new AbortController().signal,
   }).catch((error) => {
-    let errorMessage =
-      error instanceof Error ? error.message : String(error ?? '')
+    let errorMessage = isFetchIdleTimeoutError(error)
+      ? FETCH_IDLE_TIMEOUT_USER_MESSAGE
+      : error instanceof Error
+        ? error.message
+        : String(error ?? '')
     const apiErrorDetails = extractApiErrorDetails(error)
     const statusCode = apiErrorDetails.statusCode ?? getErrorStatusCode(error)
     const {
@@ -630,6 +721,7 @@ async function handleToolCall({
   fs,
   env,
   apiKey,
+  signal,
 }: {
   action: ServerAction<'tool-call-request'>
   overrides: NonNullable<CodebuffClientOptions['overrideTools']>
@@ -638,18 +730,37 @@ async function handleToolCall({
   fs: CodebuffFileSystem
   env?: Record<string, string>
   apiKey: string
+  signal?: AbortSignal
 }): Promise<{ output: ToolResultOutput[] }> {
   const toolName = action.toolName
   const input = action.input
+
+  if (signal?.aborted) {
+    return {
+      output: [
+        {
+          type: 'json',
+          value: {
+            message: 'Tool call cancelled: the run was aborted by the user.',
+          },
+        },
+      ],
+    }
+  }
 
   // Handle MCP tool calls when mcpConfig is present
   if (action.mcpConfig) {
     try {
       const mcpClientId = await getMCPClient(action.mcpConfig)
-      const result = await callMCPTool(mcpClientId, {
-        name: toolName,
-        arguments: input,
-      })
+      const result = await callMCPTool(
+        mcpClientId,
+        {
+          name: toolName,
+          arguments: input,
+        },
+        undefined,
+        signal ? { signal } : undefined,
+      )
       return { output: result }
     } catch (error) {
       return {
@@ -717,13 +828,18 @@ async function handleToolCall({
         ...input,
         cwd: path.resolve(resolvedCwd, input.cwd ?? '.'),
         env,
+        signal,
       } as Parameters<typeof runTerminalCommand>[0])
     } else if (toolName === 'read_url') {
-      result = await readUrl(input as Parameters<typeof readUrl>[0])
+      result = await readUrl({
+        ...(input as Parameters<typeof readUrl>[0]),
+        signal,
+      })
     } else if (toolName === 'code_search') {
       result = await codeSearch({
         projectPath: requireCwd(cwd, 'code_search'),
         ...input,
+        signal,
       } as Parameters<typeof codeSearch>[0])
     } else if (toolName === 'list_directory') {
       result = await listDirectory({

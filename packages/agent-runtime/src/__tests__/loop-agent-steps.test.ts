@@ -347,6 +347,34 @@ describe('loopAgentSteps - runAgentStep vs runProgrammaticStep behavior', () => 
     expect(result.agentState).toBeDefined()
   })
 
+  it('should pass the full message history to the traceWriter when provided', async () => {
+    const recordedSteps: Array<{ agentId: string; messages: unknown[] }> = []
+    const traceWriter = {
+      recordStep: (params: { agentId: string; messages: unknown[] }) => {
+        recordedSteps.push(params)
+      },
+    }
+
+    const result = await loopAgentSteps({
+      ...loopAgentStepsBaseParams,
+      traceWriter,
+      agentType: 'test-agent',
+      localAgentTemplates: {
+        'test-agent': { ...mockTemplate, handleSteps: undefined },
+      },
+    })
+
+    expect(result.agentState).toBeDefined()
+    // Called at least at the start and end of the step
+    expect(recordedSteps.length).toBeGreaterThanOrEqual(2)
+    expect(recordedSteps[0]!.agentId).toBe('test-agent-id')
+    // End-of-step call sees the assistant response appended to the history
+    const lastMessages = recordedSteps[recordedSteps.length - 1]!.messages
+    expect(lastMessages.length).toBeGreaterThan(
+      recordedSteps[0]!.messages.length,
+    )
+  })
+
   it('should handle programmatic agent error and still call LLM', async () => {
     // Test error handling in programmatic step - should still allow LLM to run
 
@@ -1073,6 +1101,83 @@ describe('loopAgentSteps - runAgentStep vs runProgrammaticStep behavior', () => 
         expect(result.output.error).toBe('session_superseded')
         expect(result.output.statusCode).toBe(409)
       }
+    })
+
+    it('should explain fetch idle timeouts instead of showing the raw runtime message', async () => {
+      const llmOnlyTemplate = {
+        ...mockTemplate,
+        handleSteps: undefined,
+      }
+
+      const localAgentTemplates = {
+        'test-agent': llmOnlyTemplate,
+      }
+
+      // Bun aborts a fetch after 5 minutes without receiving bytes, throwing a
+      // DOMException named TimeoutError with this exact message.
+      loopAgentStepsBaseParams.promptAiSdkStream = async function* () {
+        const timeoutError = new Error('The operation timed out.')
+        timeoutError.name = 'TimeoutError'
+        throw timeoutError
+      }
+
+      const result = await loopAgentSteps({
+        ...loopAgentStepsBaseParams,
+        agentType: 'test-agent',
+        localAgentTemplates,
+      })
+
+      expect(result.output.type).toBe('error')
+      if (result.output.type === 'error') {
+        expect(result.output.message).toContain(
+          'no data was received from the server for 5 minutes',
+        )
+        expect(result.output.message).not.toContain('Agent run error:')
+        expect(result.output.message).not.toBe('The operation timed out.')
+      }
+    })
+  })
+
+  describe('steering (drainSteeringMessages)', () => {
+    it('appends a steering message at the step boundary and continues the turn', async () => {
+      // The mock LLM ends the turn after one step. A steering message that arrives
+      // during that step should be appended to history and keep the turn going, so
+      // the agent runs a second step that can see (and act on) the new message.
+      const steerText = 'Also rename the variable to fooBar'
+      let drainCalls = 0
+      const drainSteeringMessages = () => {
+        drainCalls++
+        return drainCalls === 1 ? [steerText] : []
+      }
+
+      const result = await loopAgentSteps({
+        ...loopAgentStepsBaseParams,
+        agentType: 'test-agent',
+        drainSteeringMessages,
+      })
+
+      // Step 1 wanted to end the turn, but the steer kept it going → a 2nd step ran.
+      expect(llmCallCount).toBe(2)
+
+      // The steered text landed in history as a user message.
+      const steered = result.agentState.messageHistory.find(
+        (m) =>
+          m.role === 'user' && JSON.stringify(m.content).includes(steerText),
+      )
+      expect(steered).toBeDefined()
+      expect((steered as { tags?: string[] }).tags).toContain('USER_PROMPT')
+    })
+
+    it('does not extend the turn when no steering messages arrive', async () => {
+      const result = await loopAgentSteps({
+        ...loopAgentStepsBaseParams,
+        agentType: 'test-agent',
+        drainSteeringMessages: () => [],
+      })
+
+      // No steer → the agent ends the turn after its single step, as usual.
+      expect(llmCallCount).toBe(1)
+      expect(result.agentState).toBeDefined()
     })
   })
 })

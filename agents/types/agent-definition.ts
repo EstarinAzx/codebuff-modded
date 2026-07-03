@@ -379,7 +379,9 @@ export type ModelName =
   | 'openai/gpt-5-nano'
 
   // Anthropic
+  | 'anthropic/claude-fable-5'
   | 'anthropic/claude-sonnet-4.6'
+  | 'anthropic/claude-opus-4.8'
   | 'anthropic/claude-opus-4.7'
   | 'anthropic/claude-opus-4.6'
   | 'anthropic/claude-opus-4.5'
@@ -434,6 +436,7 @@ export type ModelName =
   | 'moonshotai/kimi-k2'
   | 'moonshotai/kimi-k2:nitro'
   | 'moonshotai/kimi-k2.6'
+  | 'moonshotai/kimi-k2.7-code'
   | 'z-ai/glm-5'
   | 'z-ai/glm-5.1'
   | 'z-ai/glm-4.6'

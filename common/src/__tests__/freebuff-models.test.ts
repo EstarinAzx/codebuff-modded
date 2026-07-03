@@ -5,6 +5,7 @@ import {
   DEFAULT_FREEBUFF_MODEL_ID,
   FALLBACK_FREEBUFF_MODEL_ID,
   FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+  FREEBUFF_DATA_COLLECTION_WARNING,
   FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID,
   FREEBUFF_ENABLE_MIMO_MODELS_IN_UI,
   FREEBUFF_KIMI_MODEL_ID,
@@ -17,20 +18,23 @@ import {
   SUPPORTED_FREEBUFF_MODELS,
   getFreebuffDeploymentAvailabilityLabel,
   getFreebuffModelsForAccessTier,
+  getRecommendedFreebuffModelId,
   isFreebuffDeploymentHours,
+  isFreebuffTracedModelId,
   isFreebuffModelId,
   isFreebuffModelAllowedForAccessTier,
   isFreebuffPremiumModelId,
   isSupportedFreebuffModelId,
   resolveFreebuffModelForAccessTier,
 } from '../constants/freebuff-models'
+import type { FreebuffModelOption } from '../constants/freebuff-models'
 import { minimaxModels } from '../constants/model-config'
 
 const MINIMAX_M3_MODEL_ID = minimaxModels.minimaxM3
 
 describe('freebuff model availability', () => {
-  test('defaults to Kimi K2.6, falls back to DeepSeek V4 Flash for new clients', () => {
-    expect(DEFAULT_FREEBUFF_MODEL_ID).toBe(FREEBUFF_KIMI_MODEL_ID)
+  test('defaults to MiniMax M3, falls back to DeepSeek V4 Flash for new clients', () => {
+    expect(DEFAULT_FREEBUFF_MODEL_ID).toBe(MINIMAX_M3_MODEL_ID)
     expect(FALLBACK_FREEBUFF_MODEL_ID).toBe(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID)
   })
 
@@ -50,6 +54,31 @@ describe('freebuff model availability', () => {
     expect((deepseek as { warning?: string } | undefined)?.warning).toBe(
       'Collects data for training',
     )
+  })
+
+  test('only the DeepSeek family is trace-stored in free mode; M3 has no warning', () => {
+    const m3 = FREEBUFF_MODELS.find((m) => m.id === MINIMAX_M3_MODEL_ID)
+    expect((m3 as { warning?: string } | undefined)?.warning).toBeUndefined()
+    // The DeepSeek family discloses data collection and IS stored.
+    expect(isFreebuffTracedModelId(FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID)).toBe(true)
+    expect(isFreebuffTracedModelId(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID)).toBe(
+      true,
+    )
+    // Everything else (incl. M3 on Fireworks) is NOT stored.
+    expect(isFreebuffTracedModelId(MINIMAX_M3_MODEL_ID)).toBe(false)
+    expect(isFreebuffTracedModelId(FREEBUFF_KIMI_MODEL_ID)).toBe(false)
+    expect(isFreebuffTracedModelId(FREEBUFF_MIMO_V25_MODEL_ID)).toBe(false)
+    expect(isFreebuffTracedModelId(null)).toBe(false)
+  })
+
+  test('trace storage is one source of truth with the data-collection warning', () => {
+    // A model is traced in free mode iff it shows the data-collection caveat.
+    const models: readonly FreebuffModelOption[] = SUPPORTED_FREEBUFF_MODELS
+    for (const model of models) {
+      expect(isFreebuffTracedModelId(model.id)).toBe(
+        model.warning === FREEBUFF_DATA_COLLECTION_WARNING,
+      )
+    }
   })
 
   test('DeepSeek V4 Flash is selectable and non-premium', () => {
@@ -144,11 +173,8 @@ describe('freebuff model availability', () => {
     expect(
       isFreebuffModelAllowedForAccessTier(MINIMAX_M3_MODEL_ID, 'full'),
     ).toBe(true)
-    // Pickers split sections by the premium flag while preserving array order,
-    // so "last unlimited entry" means last in FREEBUFF_MODELS overall.
-    expect(FREEBUFF_MODELS[FREEBUFF_MODELS.length - 1]!.id).toBe(
-      MINIMAX_M3_MODEL_ID,
-    )
+    // MiniMax M3 is the recommended default, so it leads the picker list.
+    expect(FREEBUFF_MODELS[0]!.id).toBe(MINIMAX_M3_MODEL_ID)
   })
 
   test('limited access exposes DeepSeek V4 Flash and non-Pro MiMo 2.5', () => {
@@ -193,23 +219,49 @@ describe('freebuff model availability', () => {
     ).toBe(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID)
   })
 
-  test('only smart freebuff models can spawn the gemini-thinker subagent', () => {
+  test('recommends an unlimited, in-tier model for the picker hero', () => {
+    // Full access → MiniMax M3 (the unlimited default), so the one-Enter
+    // start never burns a premium session.
+    expect(getRecommendedFreebuffModelId('full')).toBe(MINIMAX_M3_MODEL_ID)
+    expect(getRecommendedFreebuffModelId(undefined)).toBe(MINIMAX_M3_MODEL_ID)
+    expect(isFreebuffPremiumModelId(getRecommendedFreebuffModelId('full'))).toBe(
+      false,
+    )
+    // Limited access → DeepSeek V4 Flash, which is in the limited model set.
+    expect(getRecommendedFreebuffModelId('limited')).toBe(
+      FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+    )
+    expect(
+      getFreebuffModelsForAccessTier('limited').some(
+        (m) => m.id === getRecommendedFreebuffModelId('limited'),
+      ),
+    ).toBe(true)
+  })
+
+  test('full-access freebuff models can spawn the gemini-thinker subagent', () => {
+    // Full-access models (non-limited, non-fastest) get the thinker.
     expect(canFreebuffModelSpawnGeminiThinker(FREEBUFF_KIMI_MODEL_ID)).toBe(
       true,
     )
     expect(
       canFreebuffModelSpawnGeminiThinker(FREEBUFF_DEEPSEEK_V4_PRO_MODEL_ID),
     ).toBe(true)
+    expect(
+      canFreebuffModelSpawnGeminiThinker(FREEBUFF_MIMO_V25_PRO_MODEL_ID),
+    ).toBe(true)
+    expect(canFreebuffModelSpawnGeminiThinker(MINIMAX_M3_MODEL_ID)).toBe(true)
+
+    // Legacy "Fastest" MiniMax M2.7 skips it to preserve the fastest tier.
     expect(canFreebuffModelSpawnGeminiThinker(FREEBUFF_MINIMAX_MODEL_ID)).toBe(
       false,
     )
-    expect(canFreebuffModelSpawnGeminiThinker(MINIMAX_M3_MODEL_ID)).toBe(false)
+    // Limited-tier models (DeepSeek V4 Flash, MiMo 2.5) skip it.
     expect(
       canFreebuffModelSpawnGeminiThinker(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID),
     ).toBe(false)
-    expect(
-      canFreebuffModelSpawnGeminiThinker(FREEBUFF_MIMO_V25_PRO_MODEL_ID),
-    ).toBe(false)
+    expect(canFreebuffModelSpawnGeminiThinker(FREEBUFF_MIMO_V25_MODEL_ID)).toBe(
+      false,
+    )
   })
 
   test('does not support GLM 5.1 for freebuff sessions', () => {

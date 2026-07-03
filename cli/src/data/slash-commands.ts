@@ -1,6 +1,5 @@
 import { CHATGPT_OAUTH_ENABLED } from '@codebuff/common/constants/chatgpt-oauth'
 import { AGENT_MODES, IS_FREEBUFF } from '../utils/constants'
-import { getChatGptOAuthStatus } from '../utils/chatgpt-oauth'
 
 import type { SkillsMap } from '@codebuff/common/types/skill'
 
@@ -122,12 +121,12 @@ const ALL_SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'plan',
     label: 'plan',
-    description: 'Create a plan with GPT 5.4',
+    description: 'Create a plan for how to implement a request',
   },
   {
     id: 'review',
     label: 'review',
-    description: 'Review code changes with GPT 5.4',
+    description: 'Review code changes',
   },
   {
     id: 'new',
@@ -141,6 +140,12 @@ const ALL_SLASH_COMMANDS: SlashCommand[] = [
     label: 'history',
     description: 'Browse and resume past conversations',
     aliases: ['chats'],
+  },
+  {
+    id: 'copy',
+    label: 'copy',
+    description: 'Copy the full conversation (messages + tool results) to the clipboard',
+    aliases: ['copy-chat', 'export'],
   },
   {
     id: 'agent:gpt-5',
@@ -276,16 +281,7 @@ export function getSlashCommandsWithSkills(skills: SkillsMap): SlashCommand[] {
     description: truncateDescription(skill.description),
   }))
 
-  let commands = [...SLASH_COMMANDS, ...skillCommands]
-
-  if (IS_FREEBUFF && !getChatGptOAuthStatus().connected) {
-    commands = commands.map((cmd) => {
-      if (cmd.id === 'review' || cmd.id === 'plan') {
-        return { ...cmd, description: 'Connect required. ' + cmd.description }
-      }
-      return cmd
-    })
-  }
+  const commands = [...SLASH_COMMANDS, ...skillCommands]
 
   return commands
 }

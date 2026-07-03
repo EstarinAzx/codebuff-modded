@@ -1,6 +1,5 @@
 import { buildArray } from '@codebuff/common/util/array'
 import { COMPOSIO_META_TOOL_NAMES } from '@codebuff/common/constants/composio'
-import { deepseekModels } from '@codebuff/common/constants/model-config'
 import {
   FREEBUFF_GEMINI_THINKER_AGENT_ID,
   FREEBUFF_GEMINI_THINKER_INSTRUCTIONS_PROMPT,
@@ -12,6 +11,7 @@ import {
   canFreebuffModelSpawnGeminiThinker,
   FREEBUFF_KIMI_MODEL_ID,
   FREEBUFF_MINIMAX_MODEL_ID,
+  FREEBUFF_MINIMAX_M3_MODEL_ID,
 } from '@codebuff/common/constants/freebuff-models'
 
 import { publisher } from '../constants'
@@ -47,16 +47,16 @@ export function createBase2(
   const isFree = mode === 'free' || mode === 'lite'
 
   const isSonnet = false
-  // Lite (paid Codebuff) defaults to DeepSeek V4 Flash. The unqualified
-  // base2-free agent still uses MiniMax for legacy callers; new Freebuff
-  // clients select explicit free variants from the model picker.
+  // Lite mode runs MiniMax M3 (routed through the Fireworks AI API). The
+  // unqualified base2-free agent still uses MiniMax for legacy callers; new
+  // Freebuff clients select explicit free variants from the model picker.
   const model =
     modelOverride ??
     (mode === 'lite'
-      ? deepseekModels.deepseekV4Flash
+      ? FREEBUFF_MINIMAX_M3_MODEL_ID
       : mode === 'free'
         ? FREEBUFF_MINIMAX_MODEL_ID
-        : 'anthropic/claude-opus-4.7')
+        : 'anthropic/claude-opus-4.8')
   // Smart freebuff model variants (Kimi, DeepSeek) can offload deeper
   // reasoning. Fast MiniMax omits the extra round trip by construction.
   const hasFreeGeminiThinker =
@@ -160,7 +160,8 @@ Current date: ${PLACEHOLDER.CURRENT_DATE}.
     }
 - **Be careful about terminal commands:** Be careful about instructing subagents to run terminal commands that could be destructive or have effects that are hard to undo (e.g. git push, git commit, running any scripts -- especially ones that could alter production environments (!), installing packages globally, etc). Don't run any of these effectful commands unless the user explicitly asks you to.
 - **Do what the user asks:** If the user asks you to do something, even running a risky terminal command, do it.
-- **Don't use set_output:** The set_output tool is for spawned subagents to report results. Don't use it yourself.${
+- **Don't use set_output:** The set_output tool is for spawned subagents to report results. Don't use it yourself.
+- **Discover and install skills:** Skills are reusable, self-contained instructions for accomplishing a task. Beyond the skills already listed for the \`skill\` tool, you can find and install community skills from the command line: \`npx skills find <query>\` to search, \`npx skills add <owner/repo> --list\` to preview a repo's skills, and \`npx skills add <owner/repo> --skill <name> --yes\` to install one into \`.agents/skills/\`. After installing, load it by name with the \`skill\` tool. These community skills are not vetted, so confirm with the user which skill(s) to install before running \`npx skills add\`.${
       ENABLE_COMPOSIO_TOOLS
         ? `
 - **External apps:** When Composio tools are available and the user asks to work with connected apps or services like Gmail, Google Calendar, GitHub, Slack, Linear, or Notion, use them to search for the right app tools, help the user connect their account (use the render_ui tool to show a button if the user needs to click a link), and execute the requested action.`
@@ -601,6 +602,8 @@ function buildImplementationStepPrompt({
     isFree &&
       !noReview &&
       `You must spawn a ${freeCodeReviewerAgentId} to review the changes after you have implemented the changes and in parallel with typechecking or testing.`,
+    (isDefault || isMax || (isFree && !noReview)) &&
+      `Don't spawn a code reviewer if you haven't made code changes, e.g. when you only wrote a plan or answered a question.`,
     `When the user request is complete, summarize your changes in a sentence${isFast ? '' : ' or a few short bullet points'}.${isSonnet ? " Don't create any summary markdown files or example documentation files, unless asked by the user." : ''}.`,
     !noAskUser &&
       `At the end of your turn, you must use the suggest_followups tool to suggest around 3 next steps the user might want to take even if the user just asks a question.`,

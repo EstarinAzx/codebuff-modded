@@ -2,6 +2,7 @@ import { CHATGPT_OAUTH_ENABLED } from '@codebuff/common/constants/chatgpt-oauth'
 import { safeOpen } from '../utils/open-url'
 
 import { handleAdsEnable, handleAdsDisable } from './ads'
+import { handleCopyConversationCommand } from './copy-conversation'
 import { handleHelpCommand } from './help'
 import { handleImageCommand } from './image'
 import { handleInitializationFlowLocally } from './init'
@@ -25,10 +26,10 @@ import { tryForkPresetAdd } from '../fork-impls/preset-add-handlers'
 import { returnToFreebuffLanding } from '../hooks/use-freebuff-session'
 import { useThemeStore } from '../hooks/use-theme'
 import { WEBSITE_URL } from '../login/constants'
+import { startNewChat } from '../project-files'
 import { useChatStore } from '../state/chat-store'
 import { useFeedbackStore } from '../state/feedback-store'
 import { useLoginStore } from '../state/login-store'
-import { getChatGptOAuthStatus } from '../utils/chatgpt-oauth'
 import { AGENT_MODES, END_SESSION_MESSAGE, IS_FREEBUFF } from '../utils/constants'
 import { getSystemMessage, getUserMessage } from '../utils/message-history'
 import { capturePendingAttachments } from '../utils/pending-attachments'
@@ -234,6 +235,13 @@ const ALL_COMMANDS: CommandDefinition[] = [
       clearInput(params)
     },
   }),
+  defineCommand({
+    name: 'copy',
+    aliases: ['copy-chat', 'export'],
+    handler: async (params) => {
+      await handleCopyConversationCommand(params)
+    },
+  }),
   defineCommandWithArgs({
     name: 'feedback',
     aliases: ['bug', 'report'],
@@ -345,9 +353,11 @@ const ALL_COMMANDS: CommandDefinition[] = [
     handler: (params, args) => {
       const trimmedArgs = args.trim()
 
-      // Clear the conversation
+      // Clear the conversation and rotate to a fresh chat directory, so the
+      // next message doesn't overwrite the previous conversation's history
       params.setMessages(() => [])
       params.clearMessages()
+      startNewChat()
       params.saveToHistory(params.inputValue.trim())
       clearInput(params)
       params.stopStreaming()
@@ -549,21 +559,8 @@ const ALL_COMMANDS: CommandDefinition[] = [
   defineCommandWithArgs({
     name: 'plan',
     handler: (params, args) => {
-      // In freebuff mode, require ChatGPT connection
-      if (IS_FREEBUFF && !getChatGptOAuthStatus().connected) {
-        params.setMessages((prev) => [
-          ...prev,
-          getUserMessage(params.inputValue.trim()),
-          getSystemMessage(
-            'Connect your ChatGPT account to use /plan. Use /connect to get started.',
-          ),
-        ])
-        params.saveToHistory(params.inputValue.trim())
-        clearInput(params)
-        useChatStore.getState().setInputMode('connect:chatgpt')
-        return
-      }
-
+      // /plan runs on the selected model by default, or delegates to GPT when a
+      // ChatGPT account is connected (handled in buildPlanPrompt). No gate.
       const trimmedArgs = args.trim()
 
       params.saveToHistory(params.inputValue.trim())
@@ -588,21 +585,8 @@ const ALL_COMMANDS: CommandDefinition[] = [
   defineCommandWithArgs({
     name: 'review',
     handler: (params, args) => {
-      // In freebuff mode, require ChatGPT connection
-      if (IS_FREEBUFF && !getChatGptOAuthStatus().connected) {
-        params.setMessages((prev) => [
-          ...prev,
-          getUserMessage(params.inputValue.trim()),
-          getSystemMessage(
-            'Connect your ChatGPT account to use /review. Use /connect to get started.',
-          ),
-        ])
-        params.saveToHistory(params.inputValue.trim())
-        clearInput(params)
-        useChatStore.getState().setInputMode('connect:chatgpt')
-        return
-      }
-
+      // /review runs on the selected model by default, or delegates to GPT when
+      // a ChatGPT account is connected (handled in buildReviewPrompt). No gate.
       const trimmedArgs = args.trim()
 
       params.saveToHistory(params.inputValue.trim())

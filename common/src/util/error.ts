@@ -225,6 +225,26 @@ export function parseApiErrorResponseBody(responseBody: unknown): {
     ) {
       result.message = (parsed as { message: string }).message
     }
+    // OpenAI-style nested error object: { error: { message, code, type } }.
+    // Upstream provider errors (Fireworks, OpenRouter, etc.) are relayed to
+    // the client in this shape.
+    if (
+      'error' in parsed &&
+      typeof (parsed as { error: unknown }).error === 'object' &&
+      (parsed as { error: unknown }).error !== null
+    ) {
+      const nested = (parsed as { error: Record<string, unknown> }).error
+      if (result.errorCode === undefined) {
+        if (typeof nested.code === 'string') {
+          result.errorCode = nested.code
+        } else if (typeof nested.type === 'string') {
+          result.errorCode = nested.type
+        }
+      }
+      if (result.message === undefined && typeof nested.message === 'string') {
+        result.message = nested.message
+      }
+    }
     if (
       'countryCode' in parsed &&
       typeof (parsed as { countryCode: unknown }).countryCode === 'string'
@@ -340,6 +360,39 @@ export function extractApiErrorDetails(error: unknown): ApiErrorDetails {
 
   return {}
 }
+
+/**
+ * Detects the runtime's fetch inactivity timeout (a DOMException named
+ * "TimeoutError"). Bun hardcodes this to fire after 5 minutes without
+ * receiving any bytes on a fetch response — there is no way to see it as
+ * anything but a dead connection, since the server heartbeats every 30s
+ * during streaming. Walks AI SDK RetryError wrappers and cause chains.
+ */
+export function isFetchIdleTimeoutError(error: unknown): boolean {
+  for (const candidate of getApiErrorCandidates(error)) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const { name, message } = candidate as { name?: unknown; message?: unknown }
+    if (
+      name === 'TimeoutError' ||
+      (typeof message === 'string' &&
+        message.toLowerCase().includes('the operation timed out'))
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * User-facing explanation for the fetch idle timeout. The raw runtime message
+ * ("The operation timed out.") reads like a server failure; in practice it
+ * means no bytes reached this machine for 5 minutes, which points at the
+ * network path, since the server heartbeats every 30 seconds.
+ */
+export const FETCH_IDLE_TIMEOUT_USER_MESSAGE =
+  'Connection timed out: no data was received from the server for 5 minutes, so the request was aborted.\n\n' +
+  'The server sends a heartbeat every 30 seconds while responses stream, so this usually means the connection was silently dropped in transit (VPN, proxy, firewall, or flaky network) rather than a server outage.\n\n' +
+  'Things to try: retry your message, check your network/VPN/proxy, or switch networks if it keeps happening.'
 
 // Extended error properties that various libraries add to Error objects
 interface ExtendedErrorProperties {

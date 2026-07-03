@@ -1,3 +1,7 @@
+import {
+  isShallowScanRoot,
+  SHALLOW_SCAN_MAX_DEPTH,
+} from '@codebuff/common/project-file-tree'
 import React from 'react'
 
 import { AgentModeToggle } from './agent-mode-toggle'
@@ -11,6 +15,7 @@ import { SuggestionMenu, type SuggestionItem } from './suggestion-menu'
 import { useAskUserBridge } from '../hooks/use-ask-user-bridge'
 import { useEvent } from '../hooks/use-event'
 import { useTerminalBackground } from '../hooks/use-terminal-background'
+import { tryGetProjectRoot } from '../project-files'
 import { useChatStore } from '../state/chat-store'
 import { shouldInterceptChatInputKey } from '../utils/chat-input-key-intercept'
 import { getInputModeConfig } from '../utils/input-modes'
@@ -126,6 +131,12 @@ export const ChatInputBar = ({
   // while overwriting stale cells; black fallback when the query goes
   // unanswered.
   const inputBoxBg = useTerminalBackground() ?? '#000000'
+
+  // In the home directory (or an ancestor) the file tree is only scanned a few
+  // levels deep, so tell the user why deeper files don't show up.
+  const mentionMenuFooter = isShallowScanRoot(tryGetProjectRoot())
+    ? `Files shown up to ${SHALLOW_SCAN_MAX_DEPTH} levels deep — open a project folder for full results`
+    : undefined
 
   // Increase menu size on larger screen heights
   const normalModeMaxVisible = terminalHeight > 35 ? 15 : 10
@@ -321,6 +332,7 @@ export const ChatInputBar = ({
             maxVisible={5}
             prefix="@"
             onItemClick={onMentionItemClick}
+            footer={mentionMenuFooter}
           />
         ) : null}
         <box
@@ -336,7 +348,10 @@ export const ChatInputBar = ({
           {modeConfig.label && (
             <box style={{ flexShrink: 0, paddingRight: 1 }}>
               <text>
-                <span bg={theme.info} fg={theme.background}>{` ${modeConfig.label} `}</span>
+                <span
+                  bg={theme.info}
+                  fg={theme.background}
+                >{` ${modeConfig.label} `}</span>
               </text>
             </box>
           )}
@@ -350,6 +365,14 @@ export const ChatInputBar = ({
               <text style={{ fg: theme[modeConfig.color] }}>
                 {modeConfig.icon}
               </text>
+            </box>
+          )}
+          {/* In default modes the compact box has no border or label, so it can
+              read as a passive status line. A shell-style prompt glyph signals
+              that it's a focusable input — costs no extra height. */}
+          {!modeConfig.label && !modeConfig.icon && (
+            <box style={{ flexShrink: 0 }}>
+              <text style={{ fg: theme.primary }}>❯</text>
             </box>
           )}
           <MultilineInput
@@ -405,6 +428,7 @@ export const ChatInputBar = ({
             maxVisible={normalModeMaxVisible}
             prefix="@"
             onItemClick={onMentionItemClick}
+            footer={mentionMenuFooter}
           />
         ) : null}
         <box
@@ -427,7 +451,10 @@ export const ChatInputBar = ({
             {modeConfig.label && (
               <box style={{ flexShrink: 0, paddingRight: 1 }}>
                 <text>
-                  <span bg={theme.info} fg={theme.background}>{` ${modeConfig.label} `}</span>
+                  <span
+                    bg={theme.info}
+                    fg={theme.background}
+                  >{` ${modeConfig.label} `}</span>
                 </text>
               </box>
             )}
