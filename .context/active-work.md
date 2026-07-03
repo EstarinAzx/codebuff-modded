@@ -3,8 +3,8 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-07-03
 tags: [context, active-work]
-ship: 1.3.0 (SHIPPED — upstream sync 2026-07-03; npm + GH release live)
-focus: nothing in flight — 1.3.0 shipped
+ship: 1.3.1 (SHIPPED 2026-07-03 — Codex OAuth reasoning fix; npm latest + GH release live)
+focus: nothing in flight — 1.3.1 shipped
 ---
 
 # Active Work
@@ -13,6 +13,23 @@ _Last updated: 2026-07-03 by Fable 5 (auto)_
 _At commit: `51ff4872e` (1.3.0 bump) + post-ship docs commit on `modded`._
 
 ## Current focus
+
+**v1.3.1 SHIPPED 2026-07-03 — Codex OAuth reasoning round-trip fix.** After
+1.3.0, a user reported Codex/ChatGPT **OAuth** models running tools (todos)
+then returning no final response. Root cause: `chatgpt-backend-fetch.ts`
+requested encrypted reasoning (`include: ['reasoning.encrypted_content']`,
+`store:false`) and streamed it back, but never replayed it — `convertMessages`
+had no reasoning branch, so Codex lost chain-of-thought across the tool loop
+and sometimes emitted an empty final turn. Fix caches each turn's reasoning
+item by `call_id` (from the completed response `output`) and re-injects it
+before its `function_call` on the next request. Commit `a1242f470` (via PR #1),
+bump `0be8c24f0`, tag `v1.3.1`. Shipped the standard manual way
+(MERGE-STRATEGY §Step 6): 3 tarballs rebuilt @1.3.1, GH release, npm
+`codebuff-mod@1.3.1` = `latest` (verified). Smoke-tested from source pre-ship
+(multi-step tool loop now answers every run). New test
+`sdk/src/impl/__tests__/chatgpt-backend-reasoning.test.ts`.
+
+---
 
 **Upstream sync 2026-07-03 → v1.3.0 SHIPPED same day.** `modded` synced
 399 snapshot commits (`upstream/main` @ `a8a8d1643`) per
@@ -37,11 +54,11 @@ in BYOK mode).
 
 ## State
 
-- **In flight:** nothing — **v1.3.0 SHIPPED** (npm `codebuff-mod@1.3.0`
+- **In flight:** nothing — **v1.3.1 SHIPPED** (npm `codebuff-mod@1.3.1`
   `latest` verified; GH release
-  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.3.0
-  with 3 tarballs verified by name+size; `modded` + `v1.3.0` tag
-  pushed).
+  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.3.1
+  with 3 tarballs verified by name+size; `modded` + `v1.3.1` tag
+  pushed). 1.3.0 remains available (prior release still tagged).
 - **Verified pre-ship:** typecheck green common/sdk/cli; binary prints
   1.3.0; conflict-map invariant greps all pass; test suites at
   pre-existing baselines (common 1 / sdk 65 / cli 19+5err — suspicious
