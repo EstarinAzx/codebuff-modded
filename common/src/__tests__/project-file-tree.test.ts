@@ -24,7 +24,12 @@ function createFsWithFiles(root: string, files: string[]) {
       ;(dirChildren[dir] ??= new Set()).add(path.basename(child))
       if (dir === root) break
       child = dir
-      dir = path.dirname(dir)
+      const parent = path.dirname(dir)
+      // Guard: on win32 a posix-style root ('/repo') never matches the
+      // backslash paths dirname produces, and dirname('\\') === '\\' would
+      // spin forever. Stop at the filesystem root instead of hanging.
+      if (parent === dir) break
+      dir = parent
     }
   }
   return createMockFs({
@@ -63,7 +68,8 @@ describe('getProjectFileTree', () => {
   })
 
   it('scans regular project roots without a depth limit', async () => {
-    const root = '/repo'
+    // path.resolve keeps mock-fs keys separator-consistent on win32
+    const root = path.resolve('/repo')
     const fs = createFsWithFiles(root, ['a/b/c/d/e.txt'])
 
     const tree = await getProjectFileTree({ projectRoot: root, fs })
