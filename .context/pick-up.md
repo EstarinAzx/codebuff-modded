@@ -5,39 +5,34 @@ this file). Project is the BYOK Codebuff fork, `modded` branch.
 
 ## What the last session finished
 
-**Upstream sync 2026-07-03** — merged 399 snapshot commits
-(`upstream/main` @ `a8a8d1643`) into `modded` per MERGE-STRATEGY.md:
+**Upstream sync 2026-07-03 + v1.3.0 SHIPPED same session:**
 
-- 3 commits on `modded`: `595adc673` (merge, 5 conflicts resolved per
-  map), `9441009e6` (`WEBSITE_URL` → `getWebsiteUrl()` compile fix),
-  `291d2b9e7` (win32 infinite-loop fix in upstream's new
-  `project-file-tree.test.ts`).
-- Verified: typecheck ×3 green, binary builds + prints 1.2.0, all
-  conflict-map invariant greps pass, test suites at pre-existing
-  baselines (details in `active-work.md` "State").
-- `main` fast-forwarded + pushed. **`modded` NOT pushed** — wrap-up
-  go/no-go gate got no user response.
+- Merged 399 snapshot commits (`upstream/main` @ `a8a8d1643`) per
+  MERGE-STRATEGY.md; 5 conflicts resolved per map + 2 fork fixes
+  (`getWebsiteUrl` repoint, win32 test-helper loop).
+- Released: npm `codebuff-mod@1.3.0` = `latest` (verified); GH release
+  v1.3.0 with 3 tarballs (verified); `modded` + tag pushed.
+- Sync highlights now shipped: SSRF guard for web tools, `/copy`
+  command, suggested prompts, GLM/Kimi/MiniMax/Opus agents, bun 1.3.14.
 
 ## Next task
 
-**Push `modded`** after the user eyeballs (`git push origin modded` —
-3 commits). Then optional:
+**Nothing required — 1.3.0 is out.** Optional (priority order):
 
-1. Cut 1.2.1 patch release if user wants upstream's SSRF guard/fixes
-   shipped (manual runbook: MERGE-STRATEGY.md step 6).
-2. Carried live smokes (published binary; fallback chain with
-   Brave/Tavily key).
+1. Live smoke published binary: `npm i -g codebuff-mod` → `cbm` →
+   `/providers:list` → small prompt → `web_search` (needs
+   `SERPER_API_KEY`); also one `read_url` call — upstream's new SSRF
+   guard sits on that path, confirm no false-positive blocking in BYOK.
+2. Fallback-chain live smoke (Brave/Tavily key + bad Serper key).
 
 ## Landmines / notes
 
-- **Upstream tests assume posix** — before calling a Windows test
-  failure a merge regression, run that file at the pre-merge commit
-  (`b0488029d`) in a temp worktree. Baseline now: common 1 / sdk 65 /
-  cli 19+5err.
-- **Never adopt upstream's `cli/release/index.js`** — it downloads
-  `-baseline` tarballs the fork doesn't publish. See [[decisions]]
-  2026-07-03 + new conflict-map entry.
+- **Upstream tests assume posix** — new Windows test failures: check
+  against pre-merge commit in a temp worktree before treating as
+  regression. Baselines in MERGE-STRATEGY "Test baseline".
+- **Never adopt upstream's `cli/release/index.js`** ([[decisions]]
+  2026-07-03) — it downloads `-baseline` tarballs the fork doesn't
+  publish.
 - **`testCiEnv.SERPER_API_KEY` is load-bearing** — see [[gotchas]].
-- Untracked `.codeboarding/` in repo root is the user's — keep out of
-  commits.
-- Full state in `active-work.md`; sync rationale in `decisions.md`.
+- Untracked `.codeboarding/` is the user's — keep out of commits.
+- Full state in `active-work.md`; rationale in `decisions.md`.
