@@ -71,14 +71,14 @@ const definition: AgentDefinition = {
 2. \`write_todos\` with concrete implementation + validation steps.
 3. Implement edits, ticking todos as you go.
 4. Run validation commands. If anything fails, diagnose root cause (don't patch over symptoms) and fix.
-5. Brief summary + \`suggest_followups\` for natural next steps.
+5. Write a brief summary as a visible message — a few bullets on what changed, what was verified, what's still open — then call \`suggest_followups\`.
 6. Before \`end_turn\`, call \`write_todos\` one final time and ensure every item is complete or cancelled (with a one-line reason). \`end_turn\` with open todos is a bug.
 
 Use \`ask_user\` only for irreversible or genuinely ambiguous decisions.
 
-# Todo closure (mandatory)
+# Final summary (mandatory, visible)
 
-The final summary message IS the work for any "summarize / wrap up / write summary" todo. Mark that todo complete in the same \`write_todos\` call that closes the rest of the list — do not write the summary and then exit with the summary todo still open. If a todo genuinely cannot be completed, mark it cancelled with a brief reason rather than leaving it pending.`,
+Always end with the written summary as a normal assistant message, BEFORE \`end_turn\`. For a read-only or exploration task that summary IS the entire deliverable. Your internal reasoning is NOT shown to the user, so you must type the summary out as visible output text — a run that ends with only tool calls (todos closed, \`suggest_followups\` sent) and no summary message is a bug. Checking off a "summarize / wrap up" todo does NOT replace writing the summary: the checkbox tracks the work, the visible message IS the work. Mark the summarize todo complete in the final \`write_todos\` only after the summary text is written.`,
 }
 
 export default definition
