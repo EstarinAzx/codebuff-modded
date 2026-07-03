@@ -173,7 +173,7 @@ export async function getModelForRequest(
   // who forgot to register a profile see a clear error instead of confusing
   // 401s against the sentinel URL.
   if (
-    WEBSITE_URL === SENTINEL_BACKEND_URL &&
+    getWebsiteUrl() === SENTINEL_BACKEND_URL &&
     process.env.CODEBUFF_USE_BACKEND !== '1'
   ) {
     throw new Error(
