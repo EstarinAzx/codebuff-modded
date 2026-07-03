@@ -5,43 +5,46 @@ this file). Project is the BYOK Codebuff fork, `modded` branch.
 
 ## What the last session finished
 
-**v1.3.1 SHIPPED 2026-07-03 — Codex OAuth reasoning round-trip fix.**
+**v1.3.2 SHIPPED 2026-07-04 — Codex OAuth "no final response" fix (template).**
 
-- Bug: Codex/ChatGPT **OAuth** models ran tools (todos) then returned no
-  final response. Root cause: `sdk/src/impl/chatgpt-backend-fetch.ts`
-  requested encrypted reasoning (`store:false`) but never replayed it —
-  `convertMessages` had no reasoning branch, so Codex lost chain-of-thought
-  across the tool loop and sometimes emitted an empty final turn.
-- Fix: cache each turn's reasoning item by `call_id` (from completed response
-  `output`), re-inject before its `function_call` on the next request. Deduped
-  per reasoning id; degrades gracefully when absent. Commit `a1242f470`
-  (PR #1, merged), bump `0be8c24f0`, tag `v1.3.1`.
-- Shipped manual (MERGE-STRATEGY §Step 6): 3 tarballs rebuilt @1.3.1 →
-  GH release v1.3.1 → npm `codebuff-mod@1.3.1` = `latest` (verified).
-- New test: `sdk/src/impl/__tests__/chatgpt-backend-reasoning.test.ts` (3 pass).
+- Two swings at the same user report ("Codex models stop — tools run, todos
+  update, no final response"):
+  - **1.3.1** (`a1242f470`): reasoning round-trip in
+    `sdk/src/impl/chatgpt-backend-fetch.ts` (replay encrypted reasoning across
+    the tool loop). Real bug, but did NOT fix the symptom — user ran 1.3.1,
+    still broke. Logs: agent `mod-max`, clean loop end, no error, no final text.
+  - **1.3.2** (`fb9dcf0a4`): the actual cause — `mod-max`/`mod-default`
+    `instructionsPrompt` told the model *"the summary IS the work for the
+    summarize todo — mark it complete in the same `write_todos` call"*. Codex
+    reads that literally → checks the box, exits, skips the visible summary
+    (internal reasoning isn't shown). Fixed: visible summary mandatory BEFORE
+    `end_turn`, decoupled from the checkbox, "reasoning isn't shown" note.
+- Shipped both via MERGE-STRATEGY §Step 6. npm `codebuff-mod@1.3.2` = `latest`.
 
 ## Next task
 
-**Nothing required — 1.3.1 is out.** Optional:
+**1.3.2 is prompt-only and NOT live-confirmed** (user chose ship over smoke).
 
-1. Live smoke the **published** binary: fresh `npm i -g codebuff-mod` →
-   `cbm` → connect a Codex OAuth profile → multi-step tool-loop prompt →
-   confirm a final response every run (the exact path 1.3.1 fixes). Pre-ship
-   smoke was from source only.
-2. Confirm a cross-compiled linux tarball actually boots on linux (built on
-   Windows — never verified on-target).
+1. **Confirm the fix on a real Codex OAuth run:** `cbm` (or `bun run dev`) →
+   Codex profile active → read-only/explore prompt ("read X and summarise, no
+   edits") → a visible summary must appear before the suggested followups.
+   Try 2-3×.
+2. **If it still ends with no summary → escalate** to a structural guard: in
+   `packages/agent-runtime`, detect an empty final top-level turn and nudge/
+   re-emit. Bigger + merge-riskier (the shim refactor deliberately left
+   agent-runtime untouched) — weigh vs. another prompt iteration. Precedent:
+   decisions.md 1.0.4 "escalate to agent-runtime auto-close if repros persist".
 
 ## Landmines / notes
 
-- **Release is fully manual** — `bun run release` triggers upstream's private
-  workflow (dead for the fork). Full runbook: MERGE-STRATEGY §Step 6. GH
-  release MUST precede `npm publish` (launcher downloads the binary by tag).
-- **Bump BOTH** `cli/package.json` + `cli/release/package.json`; rebuild
-  binaries AFTER the bump (version is embedded). Tarball = binary only, no
-  wasm sibling.
-- **Never adopt upstream's `cli/release/index.js`** ([[decisions]]) — downloads
-  `-baseline` tarballs the fork doesn't publish.
-- **Upstream tests assume posix** — triage new Windows failures against the
-  pre-merge commit in a temp worktree first.
+- **Release is fully manual** — MERGE-STRATEGY §Step 6. Bump BOTH
+  `cli/package.json` + `cli/release/package.json`; rebuild binaries AFTER the
+  bump; GH release MUST precede `npm publish`; tarball = binary only.
+- **build-binary re-runs prebuild-agents** — `.agents/mod-*.ts` template edits
+  bake into the binary automatically at build; no separate step. Verify with
+  `grep bundled-agents.generated.ts`.
+- **`npm view` lags** — after publish it cached the old version for minutes;
+  confirm via `curl https://registry.npmjs.org/codebuff-mod/latest`.
+- **Never adopt upstream's `cli/release/index.js`** ([[decisions]]).
 - Untracked `.codeboarding/` in repo root is the user's — keep out of commits.
 - Full state in `active-work.md`; rationale in `decisions.md`.

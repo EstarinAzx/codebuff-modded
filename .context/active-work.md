@@ -3,8 +3,8 @@ type: active-work
 project: codebuff (fork — modded branch)
 updated: 2026-07-03
 tags: [context, active-work]
-ship: 1.3.1 (SHIPPED 2026-07-03 — Codex OAuth reasoning fix; npm latest + GH release live)
-focus: nothing in flight — 1.3.1 shipped
+ship: 1.3.2 (SHIPPED 2026-07-04 — Codex visible-summary fix; npm latest + GH release live)
+focus: nothing in flight — 1.3.2 shipped (prompt-only fix, not yet live-confirmed on Codex)
 ---
 
 # Active Work
@@ -13,6 +13,25 @@ _Last updated: 2026-07-03 by Fable 5 (auto)_
 _At commit: `51ff4872e` (1.3.0 bump) + post-ship docs commit on `modded`._
 
 ## Current focus
+
+**v1.3.2 SHIPPED 2026-07-04 — Codex OAuth "no final response" fix (template).**
+1.3.1's reasoning round-trip did NOT fix the reported symptom (verified: user
+ran 1.3.1, bug persisted — logs showed agent `mod-max`, clean loop end, no
+error, no final text). Real cause found: the `mod-max`/`mod-default`
+`instructionsPrompt` "Todo closure" block said *"the summary IS the work for
+the summarize todo — mark it complete in the same `write_todos` call"*, which a
+reasoning model (Codex) reads literally as check-the-box-and-exit, skipping the
+visible summary prose (its internal reasoning isn't shown). Non-reasoning models
+wrote prose anyway → Codex-only. Fix (`fb9dcf0a4`): both templates now require
+the written summary as a visible message BEFORE `end_turn`, decoupled from the
+checkbox, with an explicit "reasoning isn't shown" note. Bump `60ecd2617`, tag
+`v1.3.2`. Shipped MERGE-STRATEGY §Step 6 (3 tarballs @1.3.2 → GH release → npm
+`codebuff-mod@1.3.2` = `latest`, verified via registry direct).
+**Caveat: prompt-only, best-effort, NOT live-confirmed** — user chose ship over
+source smoke. If it recurs, escalate to a structural agent-runtime guard
+(detect an empty final top-level turn) — bigger, merge-riskier.
+
+---
 
 **v1.3.1 SHIPPED 2026-07-03 — Codex OAuth reasoning round-trip fix.** After
 1.3.0, a user reported Codex/ChatGPT **OAuth** models running tools (todos)
@@ -54,11 +73,14 @@ in BYOK mode).
 
 ## State
 
-- **In flight:** nothing — **v1.3.1 SHIPPED** (npm `codebuff-mod@1.3.1`
-  `latest` verified; GH release
-  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.3.1
-  with 3 tarballs verified by name+size; `modded` + `v1.3.1` tag
-  pushed). 1.3.0 remains available (prior release still tagged).
+- **In flight:** nothing — **v1.3.2 SHIPPED** (npm `codebuff-mod@1.3.2`
+  `latest` verified via registry-direct; GH release
+  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.3.2
+  with 3 tarballs verified by name+size; `modded` + `v1.3.2` tag
+  pushed). 1.3.0/1.3.1 remain tagged.
+- **Open:** 1.3.2 is prompt-only — confirm on a live Codex OAuth run that
+  `mod-max` now emits a visible summary on read-only/explore tasks. If not,
+  escalate (structural guard).
 - **Verified pre-ship:** typecheck green common/sdk/cli; binary prints
   1.3.0; conflict-map invariant greps all pass; test suites at
   pre-existing baselines (common 1 / sdk 65 / cli 19+5err — suspicious
