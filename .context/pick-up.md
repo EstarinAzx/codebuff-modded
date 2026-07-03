@@ -5,44 +5,39 @@ this file). Project is the BYOK Codebuff fork, `modded` branch.
 
 ## What the last session finished
 
-**Web-tools rewire** — `web_search` + `read_docs` no longer dial the
-deleted backend:
+**Upstream sync 2026-07-03** — merged 399 snapshot commits
+(`upstream/main` @ `a8a8d1643`) into `modded` per MERGE-STRATEGY.md:
 
-- `web_search` → direct serper→brave→tavily fallback chain
-  (`packages/agent-runtime/src/llm-api/fork-impls/search-providers.ts`);
-  any of `SERPER_API_KEY`/`BRAVE_API_KEY`/`TAVILY_API_KEY` enables it,
-  `CBM_SEARCH_PROVIDER` picks primary. No key → tool stripped from agent
-  templates (`gateByokWebTools`).
-- `read_docs` → direct Context7, keyless (fixed `Bearer undefined` bug).
-- Facade seam: dispatch blocks at top of `callWebSearchAPI`/
-  `callDocsSearchAPI` in `codebuff-web-api.ts`; backend-configured path
-  untouched (SDK Path B).
-- Also: fixed the 2 stale CLI provider tests; revived 2 import-broken
-  agent-runtime tool test files.
-- User live-smoked the Serper path (worked). Brave/Tavily chain
-  unit-tested only.
-- Rationale: [[decisions]] same-date entry. Merge surface:
-  MERGE-STRATEGY.md "Web-tools direct dispatch surface".
+- 3 commits on `modded`: `595adc673` (merge, 5 conflicts resolved per
+  map), `9441009e6` (`WEBSITE_URL` → `getWebsiteUrl()` compile fix),
+  `291d2b9e7` (win32 infinite-loop fix in upstream's new
+  `project-file-tree.test.ts`).
+- Verified: typecheck ×3 green, binary builds + prints 1.2.0, all
+  conflict-map invariant greps pass, test suites at pre-existing
+  baselines (details in `active-work.md` "State").
+- `main` fast-forwarded + pushed. **`modded` NOT pushed** — wrap-up
+  go/no-go gate got no user response.
 
 ## Next task
 
-**Nothing required — v1.2.0 SHIPPED** (npm `codebuff-mod@1.2.0` latest;
-GH release v1.2.0 with 3 tarballs; `modded` + tag pushed). Optional:
+**Push `modded`** after the user eyeballs (`git push origin modded` —
+3 commits). Then optional:
 
-1. Live smoke on published binary (carried since 1.1.0) — now also
-   covers `web_search` with `SERPER_API_KEY`.
-2. Fallback-chain live smoke (needs a Brave/Tavily key + bad Serper key).
+1. Cut 1.2.1 patch release if user wants upstream's SSRF guard/fixes
+   shipped (manual runbook: MERGE-STRATEGY.md step 6).
+2. Carried live smokes (published binary; fallback chain with
+   Brave/Tavily key).
 
 ## Landmines / notes
 
-- **`testCiEnv.SERPER_API_KEY` is load-bearing** — removing it breaks
-  web-search tool tests via the gate. See [[gotchas]].
-- **Gate checks key presence, not quota** — dead key keeps tool
-  advertised; calls fail fast with clear error.
-- **Test rot is wider than documented before:** common 1 / sdk 65 /
-  cli 18 pre-existing fails (Windows path-flavored), stash-baselined
-  2026-06-11. Don't chase as regressions.
-- **Brave/Tavily API shapes from training data** — if a live call 4xx's,
-  check current docs; clients degrade clean (null → next provider).
-- User's Serper key was pasted in-chat; advised rotation (low stakes).
-- Full state in `active-work.md`; strategy rationale in `decisions.md`.
+- **Upstream tests assume posix** — before calling a Windows test
+  failure a merge regression, run that file at the pre-merge commit
+  (`b0488029d`) in a temp worktree. Baseline now: common 1 / sdk 65 /
+  cli 19+5err.
+- **Never adopt upstream's `cli/release/index.js`** — it downloads
+  `-baseline` tarballs the fork doesn't publish. See [[decisions]]
+  2026-07-03 + new conflict-map entry.
+- **`testCiEnv.SERPER_API_KEY` is load-bearing** — see [[gotchas]].
+- Untracked `.codeboarding/` in repo root is the user's — keep out of
+  commits.
+- Full state in `active-work.md`; sync rationale in `decisions.md`.

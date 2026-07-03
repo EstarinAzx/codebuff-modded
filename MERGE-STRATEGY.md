@@ -134,7 +134,7 @@ cd cli && bun run build:binary               # ✅ Built codebuff-mod.exe — fu
 ./bin/codebuff-mod.exe --version             # boots; prints version
 ```
 
-**Test baseline:** SDK BYOK tests must be 100% green. CLI `providers*` tests carry **2 known-stale failures** unrelated to any merge — `providers-models.test.ts` asserts `MODEL_CATALOG['opencode-go'].length > 0` (false since v1.0.6 moved it to the live-probe set) and `providers.test.ts` asserts schema `version === 1` (fork is on v2/v3). Update those two tests when convenient; they are not merge regressions.
+**Test baseline (refreshed 2026-07-03 sync):** SDK BYOK tests must be 100% green *in isolation* (`bun test src/impl/__tests__/database-byok-skip.test.ts`) — under the full suite they can fail from cross-file state pollution, which is pre-existing. Windows full-suite baseline: common 1 fail (`coerceToArray` zod) · sdk 65 · cli 19 + 5 errors (path-flavored / env-gate / Immer-MapSet). Don't chase these as regressions. **Upstream tests assume posix** — new upstream test files may hang or fail on Windows (the 2026-07-03 sync had a `path.dirname` infinite loop in `project-file-tree.test.ts` that wedged the whole `common` run with zero output). Triage a suspicious failure by running that file at the pre-merge commit in a temp worktree before blaming the merge. (The 2 historically-stale `providers*` tests were fixed in v1.2.0.)
 
 Then a BYOK smoke against a real profile:
 
@@ -257,6 +257,12 @@ git grep -rn "from '@codebuff/internal" -- 'sdk/**/*.ts' 'cli/**/*.ts' 'common/*
 ```
 
 ### HIGH conflict risk
+
+#### `cli/release/index.js` — npm launcher (diverged wholesale since 2026-07-03)
+
+The fork launcher downloads from `EstarinAzx/codebuff-modded` GitHub releases (3 tarballs: win32-x64, linux-x64, linux-arm64). Upstream's launcher was rewritten with AVX2 CPU probing and `BASELINE_FALLBACK_TARGETS` that download `-baseline` tarballs the fork does not publish — adopting it 404s every non-AVX2 install.
+
+**Resolve:** keep the fork launcher wholesale (`git checkout --ours cli/release/index.js`). Port upstream launcher changes only together with shipping the extra tarballs they assume. See [.context/decisions.md](./.context/decisions.md) "Keep the fork launcher" (2026-07-03).
 
 #### `common/src/env-schema.ts` — BYOK env-gate
 

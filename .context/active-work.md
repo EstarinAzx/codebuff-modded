@@ -1,94 +1,97 @@
 ---
 type: active-work
 project: codebuff (fork — modded branch)
-updated: 2026-06-11
+updated: 2026-07-03
 tags: [context, active-work]
-ship: 1.2.0 (SHIPPED — BYOK-direct web tools; npm + GH release live)
-focus: nothing in flight — 1.2.0 shipped
+ship: 1.2.0 (live on npm; upstream sync merged locally after it, UNPUSHED)
+focus: upstream sync 2026-07-03 merged + verified — push pending
 ---
 
 # Active Work
 
-_Last updated: 2026-06-11 by Fable 5 (auto)_
-_At commit: see `git log` — web-tools rewire committed on `modded` after `4d9e48f40` (the 1.1.2 bump). Push/release state: see [[#Pick up here]]._
+_Last updated: 2026-07-03 by Fable 5 (auto)_
+_At commit: `291d2b9e7` on `modded` (3 commits ahead of `origin/modded`)._
 
 ## Current focus
 
-**Web-tools rewire (2026-06-11, same day as 1.1.2).** `web_search` and
-`read_docs` were backend-proxied upstream tools still dialing the deleted
-backend (sentinel `http://127.0.0.1:1`) — `web_search` failed "Unable to
-connect", `read_docs` "missing API key". Now BYOK-direct:
+**Upstream sync 2026-07-03 (merged, verified, NOT pushed).** `modded` was
+399 snapshot commits behind `upstream/main`. Synced per
+[MERGE-STRATEGY.md](../MERGE-STRATEGY.md):
 
-- **Facade dispatch** in `codebuff-web-api.ts`: backend configured
-  (non-sentinel URL + `CODEBUFF_API_KEY`) → upstream proxy path (Path B
-  preserved); else direct.
-- **`web_search`** → serper→brave→tavily fallback chain
-  (`fork-impls/search-providers.ts`); keys `SERPER_API_KEY` /
-  `BRAVE_API_KEY` / `TAVILY_API_KEY`; `CBM_SEARCH_PROVIDER` picks primary.
-  0 credits.
-- **`read_docs`** → Context7 direct, keyless (fixed upstream
-  `Bearer undefined` header bug in `context7-api.ts`).
-- **Advertisement gate** (`gateByokWebTools` via
-  `assembleLocalAgentTemplates` ← `main-prompt.ts`): zero search keys →
-  `web_search` stripped from all agent templates; `read_docs` always stays.
-- Full rationale in [[decisions]] "web_search/read_docs go
-  direct-to-provider"; merge surface documented in
-  [MERGE-STRATEGY.md](../MERGE-STRATEGY.md) "Web-tools direct dispatch
-  surface".
+- `main` fast-forwarded to `upstream/main` (`a8a8d1643`), pushed.
+- `595adc673` — merge into `modded`. 5 conflicts, resolved per map:
+  `.gitignore` (union), `cli/release/package.json` (keep
+  `codebuff-mod@1.2.0`), `cli/release/index.js` (keep fork launcher
+  wholesale — see [[decisions]] 2026-07-03), `chat-input-bar.tsx` (union:
+  fork OSC-11 fill + upstream shallow-scan footer), `agent-runtime.ts`
+  (union: fork `forkAwareStartAgentRun` + upstream `BoundedAgentCache`).
+- `9441009e6` — compile fix: fork's BYOK fail-fast in
+  `model-provider.ts` repointed `WEBSITE_URL` → `getWebsiteUrl()`
+  (upstream rename).
+- `291d2b9e7` — fixed win32 infinite loop in upstream's new
+  `common/src/__tests__/project-file-tree.test.ts` mock-fs helper
+  (posix root vs `path.dirname` backslash walk; wedged the whole
+  `common` bun test run with zero output).
+- All conflict-map invariant greps pass (hook registrations, 2 web-tools
+  dispatch blocks, chatgpt-oauth map = 22, zero `@codebuff/internal`
+  imports, no `fetchCodexModelsFromEndpoint`).
 
-Also this session: fixed the 2 stale CLI tests (`providers-models.test.ts`
-opencode-go now asserts empty catalog; `providers.test.ts` asserts schema
-v2) and revived 2 import-broken agent-runtime test files
-(`web-search-tool.test.ts`, `read-docs-tool.test.ts` — dead
-`agents-graveyard` import → `testResearcherAgent` fixture in test-utils).
+Upstream brought: `sdk/src/tools/ssrf.ts` (SSRF guard for
+read_url/code_search/terminal), bounded agent-template cache, `/copy`
+conversation command, suggested prompts, new reviewer/base2 agents
+(GLM/Kimi/MiniMax/Opus), bun 1.3.11→1.3.14, plus freebuff-only surface
+(referral/streak/engagement/log-shipper — inert in BYOK mode).
 
 ## State
 
-- **In flight:** nothing — **v1.2.0 SHIPPED** (npm `codebuff-mod@1.2.0`
-  `latest`; GH release
-  https://github.com/EstarinAzx/codebuff-modded/releases/tag/v1.2.0 with
-  3 tarballs verified; `modded` + `v1.2.0` tag pushed).
-- **Verified:** agent-runtime 451 pass / 0 fail (18 new tests: 8 facade,
-  11 provider-chain/gating, plus revived files); typecheck green in
-  common / agent-runtime / sdk / cli; common+sdk+cli failures
-  stash-baselined as pre-existing (1 / 65 / 18 — see below).
-- **Live smoke:** user tested Serper path end-to-end via `bun run dev`
-  (key set, real search worked). Brave/Tavily + fallback chain are
-  unit-tested only — no live key.
-- **Version:** 1.2.0 (`104addd40` bump; binary prints 1.2.0).
-- **Branches/tags:** unchanged (`modded-pre-shim`, pre-sync tip
-  `e534b0650`, `upstream` remote).
+- **In flight:** push of `modded` (3 commits) awaiting user go — the
+  wrap-up gate got no response (user AFK), so nothing was pushed.
+- **Verified:** typecheck green in common/sdk/cli; binary builds and
+  prints 1.2.0 (`cli/bin/codebuff-mod.exe`).
+- **Test baselines (all pre-existing flavor, none merge-caused):**
+  common 1 fail (`coerceToArray` zod) · sdk 65 fails (path-flavored;
+  `database-byok-skip` green in isolation — fails only under full-suite
+  state pollution) · cli 19 fails + 5 errors (was 18+4; the extra ones
+  are new upstream test files hitting the same pre-existing
+  `test-utils.ts` env gate / Immer MapSet flavor — verified pre-existing
+  via temp worktree at `b0488029d`).
+- **Version:** still 1.2.0 — merge is internal, no release cut. npm
+  `codebuff-mod@1.2.0` unchanged/live.
 - **Blocked:** none.
 
 ## Pick up here
 
-Nothing required — 1.2.0 is out. Optional:
+1. **Push `modded`** (`git push origin modded`) once user eyeballs.
+   No release needed unless user wants the SSRF guard + upstream fixes
+   shipped — that'd be a 1.2.1 patch via the manual runbook in
+   MERGE-STRATEGY.md step 6.
+2. Optional carry-overs (since 1.1.0): live smoke on published binary;
+   fallback-chain live smoke (needs Brave/Tavily key + bad Serper key).
 
-1. **Live smoke on published binary** (carried since 1.1.0): fresh
-   `npm i -g codebuff-mod` → `/providers:add` → prompt → Path C dispatch;
-   now also covers web_search with `SERPER_API_KEY` set.
-2. **Fallback-chain live smoke:** needs a Brave or Tavily key — set it
-   plus a deliberately-bad `SERPER_API_KEY`, confirm chain falls through.
-3. **OSC 11 first-paint flash** (cosmetic, carried).
+## Landmines / notes
 
-## Known test-suite rot (pre-existing, stash-baselined 2026-06-11)
-
-- `common`: 1 fail (`coerceToArray` zod JSON-schema comparison).
-- `sdk`: 65 fails — filesystem/path-flavored suites (getFiles,
-  loadUserKnowledgeFiles, applyPatchTool, changeFile, …) on Windows.
-- `cli`: 18 fails + 4 errors, same flavor.
-- None caused by this session's work (verified by stashing). Wider than
-  the "2 stale tests" previously documented — those 2 are now fixed.
+- **Upstream tests assume posix.** Two flavors seen this sync: the
+  project-file-tree helper hang (fixed, `291d2b9e7`) and new test files
+  erroring on the `test-utils.ts` env gate. Expect more of these per
+  sync; triage by running the file at the pre-merge commit in a temp
+  worktree before calling it a regression.
+- **`testCiEnv.SERPER_API_KEY` is load-bearing** — see [[gotchas]].
+- Untracked `.codeboarding/` dir sits in the repo root — deliberately
+  left out of all commits (user's, purpose unknown).
 
 ## Deferred — chase only if it surfaces
 
 - **`opencode` (Zen) preset still hardcoded** (2-id catalog, `opencode/`
   prefix bug). One-liner if reported — see [[gotchas]].
 - **3 un-shimmed React hooks** (`use-connection-status`, `use-gravity-ad`,
-  `use-agent-validation`) — in-place `BYOK_AT_BOOT` logic.
+  `use-agent-validation`) — in-place `BYOK_AT_BOOT` logic (untouched by
+  this sync).
 - **`ForkHooks.shouldSkipReactHook` dead field** (~10 lines).
 - **macOS binaries** — build-binary.ts supports, never shipped.
 - **Delete `LoginModal` + `cli/src/login/*`** — unreachable post-0.1.10.
+- **Baseline binaries** — if non-AVX2 users appear, port upstream's
+  launcher probe + ship `-baseline` tarballs together ([[decisions]]
+  2026-07-03).
 
 ## Open questions (carry-over)
 
@@ -100,28 +103,19 @@ Nothing required — 1.2.0 is out. Optional:
 
 - Revoked OpenCode key still plaintext in
   `~/.config/manicode/message-history.json` (user declined scrub).
-- **New 2026-06-11:** user's Serper API key pasted in-chat → lives in this
-  session's transcript on disk. Advised rotation at serper.dev; low
-  stakes (search-only key). Key is env-var-only, never written to repo.
+- User's Serper key was pasted in-chat 2026-06-11 → in that session's
+  transcript on disk. Advised rotation; low stakes.
 - `codex-oauth.json` 0600, tokens plaintext — same model as
   `providers.json`.
 
 ## Rollback paths
 
-- **Undo web-tools rewire:** revert its commit, or surgically delete the
-  two dispatch blocks in `codebuff-web-api.ts`, the gate call in
-  `agent-registry.ts`, and `fork-impls/{byok-web-tools,search-providers}.ts`.
-- **Undo strategy-B sync** (restore backend): `git checkout e534b0650 --
-  web packages/internal packages/billing packages/bigquery
-  packages/build-tools scripts`.
-- **Pre-shim rollback:** tag `v1.0.2-pre-shim` + branch `modded-pre-shim`.
-- **Undo 1.1.x UI fixes:** revert `230fd309c` (blend) / `0d5a84979`
-  (opaque fill).
-
-## Skills for next session
-
-- `/verify` or live smoke recipe above — if validating the fallback chain.
-- `/to-issues` — if deferred items become tickets.
+- **Undo this sync:** `git revert -m 1 595adc673` (then revert
+  `9441009e6` + `291d2b9e7`), or hard-reset to `b0488029d` while
+  unpushed.
+- **Undo web-tools rewire / strategy-B / pre-shim / 1.1.x UI:** unchanged
+  — see [[decisions]] and MERGE-STRATEGY.md; anchors `e534b0650`,
+  `v1.0.2-pre-shim`, `230fd309c`/`0d5a84979`.
 
 ## Related
 

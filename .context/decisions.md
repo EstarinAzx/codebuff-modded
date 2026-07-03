@@ -1,13 +1,21 @@
 ---
 type: decisions
 project: codebuff (fork — modded branch)
-updated: 2026-06-11
+updated: 2026-07-03
 tags: [decisions, modded]
 ---
 
 # Decisions — fork-local
 
 Upstream architectural decisions live in upstream `docs/` and (if added later) `docs/adr/`. This file tracks only the decisions made for fork-local work on the `modded` branch.
+
+## 2026-07-03 — Keep the fork launcher; don't adopt upstream's AVX2/baseline launcher
+
+**Decision:** In the 2026-07-03 upstream sync, `cli/release/index.js` was kept wholesale on the fork side (`git checkout --ours`). Upstream's rewritten launcher (AVX2 CPU probing + `BASELINE_FALLBACK_TARGETS`) was rejected.
+
+**Why:** Upstream's launcher downloads `<pkg>-<platform>-<arch>-baseline.tar.gz` tarballs on non-AVX2 machines. The fork's GitHub releases publish only 3 tarballs (win32-x64, linux-x64, linux-arm64) — no `-baseline` variants — so adopting it would 404 every install on a non-AVX2 CPU. Revisit only if the fork starts shipping baseline builds; then port upstream's probe logic together with the extra tarballs — both or neither.
+
+**Reversibility:** easy — upstream's version lives at `origin/main:cli/release/index.js`.
 
 ## 2026-06-11 — web_search/read_docs go direct-to-provider at the facade seam, with advertisement gating
 
