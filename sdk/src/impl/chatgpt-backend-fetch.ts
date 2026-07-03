@@ -41,6 +41,64 @@ export function extractChatGptAccountId(accessToken: string): string | null {
 }
 
 // ============================================================================
+// Reasoning continuity cache (Codex reasoning models, store:false)
+// ============================================================================
+
+// Codex reasoning models run stateless here (store:false): the encrypted
+// reasoning item a turn produces must be replayed in the NEXT request's `input`,
+// positioned right before the function_call it drove — else the model loses its
+// chain of thought across a tool loop and sometimes returns an empty final turn.
+// The AI SDK strips the reasoning_content we stream back, so we cache the raw
+// items ourselves, keyed by call_id, and re-inject them in convertMessages.
+
+interface ReasoningItem {
+  id: string
+  encrypted_content: string
+  summary: unknown[]
+}
+
+const MAX_REASONING_CACHE = 500 // ponytail: FIFO cap; raise if long tool loops drop items
+const reasoningByCallId = new Map<string, ReasoningItem>()
+
+function cacheReasoning(callId: string, item: ReasoningItem): void {
+  reasoningByCallId.set(callId, item)
+  if (reasoningByCallId.size > MAX_REASONING_CACHE) {
+    // Map preserves insertion order — first key is the oldest.
+    const oldest = reasoningByCallId.keys().next().value
+    if (oldest !== undefined) reasoningByCallId.delete(oldest)
+  }
+}
+
+// Walk a completed response's output array: associate each function_call's
+// call_id with the reasoning item that immediately preceded it.
+export function captureReasoningFromOutput(output: unknown): void {
+  if (!Array.isArray(output)) return
+  let current: ReasoningItem | null = null
+  for (const raw of output) {
+    const item = raw as Record<string, unknown>
+    if (
+      item?.type === 'reasoning' &&
+      typeof item.encrypted_content === 'string' &&
+      typeof item.id === 'string'
+    ) {
+      current = {
+        id: item.id,
+        encrypted_content: item.encrypted_content,
+        summary: Array.isArray(item.summary) ? item.summary : [],
+      }
+    } else if (item?.type === 'function_call' && current) {
+      const callId = (item.call_id as string) ?? (item.id as string)
+      if (callId) cacheReasoning(callId, current)
+    }
+  }
+}
+
+// Test-only: clear the module cache so cases don't leak into each other.
+export function __resetReasoningCache(): void {
+  reasoningByCallId.clear()
+}
+
+// ============================================================================
 // Request Transform: Chat Completions → Responses API
 // ============================================================================
 
@@ -85,7 +143,7 @@ function convertUserContentParts(content: unknown): unknown {
   })
 }
 
-function convertMessages(
+export function convertMessages(
   messages: ChatCompletionsMessage[],
 ): unknown[] {
   const input: unknown[] = []
@@ -114,7 +172,20 @@ function convertMessages(
           input.push({ type: 'message', role: 'assistant', content: msg.content })
         }
         if (msg.tool_calls) {
+          // A single reasoning item can precede a batch of tool calls — emit it
+          // once, right before the first function_call that references it.
+          const emittedReasoning = new Set<string>()
           for (const tc of msg.tool_calls) {
+            const reasoning = reasoningByCallId.get(tc.id)
+            if (reasoning && !emittedReasoning.has(reasoning.id)) {
+              input.push({
+                type: 'reasoning',
+                id: reasoning.id,
+                encrypted_content: reasoning.encrypted_content,
+                summary: reasoning.summary,
+              })
+              emittedReasoning.add(reasoning.id)
+            }
             input.push({
               type: 'function_call',
               call_id: tc.id,
@@ -337,6 +408,9 @@ function createSseTransformStream(): TransformStream<Uint8Array, Uint8Array> {
       case 'response.completed':
       case 'response.done': {
         const resp = data.response as Record<string, unknown> | undefined
+        // Cache this turn's reasoning items so the next request can replay them
+        // before their function_calls (see Reasoning continuity cache section).
+        captureReasoningFromOutput(resp?.output)
         const usage = resp?.usage as Record<string, unknown> | undefined
         const status = resp?.status as string | undefined
 
